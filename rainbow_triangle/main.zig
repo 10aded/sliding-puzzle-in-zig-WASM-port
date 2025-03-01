@@ -8,7 +8,7 @@ const alloc = std.heap.wasm_allocator;
 
 
 // Constants
-const PI = std.math.pi;
+const PI    = std.math.pi;
 
 // Globals
 var last_timestamp_seconds : f64 = undefined;
@@ -106,7 +106,8 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     const gl_LEQUAL           = glcontext.get("LEQUAL",           i32);
     const gl_COLOR_BUFFER_BIT = glcontext.get("COLOR_BUFFER_BIT", i32);
     const gl_DEPTH_BUFFER_BIT = glcontext.get("DEPTH_BUFFER_BIT", i32);
-    const gl_TRIANGLE_STRIP   = glcontext.get("TRIANGLE_STRIP",   i32);
+//    const gl_TRIANGLE_STRIP   = glcontext.get("TRIANGLE_STRIP",   i32);
+    const gl_TRIANGLES        = glcontext.get("TRIANGLES",        i32);
 
     const gl_FLOAT            = glcontext.get("FLOAT",            i32);
     
@@ -124,10 +125,22 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, position_buffer}, void);
 
-    // Now create an array of positions for the square.
-    const positions     = [_] f32{1, 1, -1, 1, 1, -1, -1, -1};
+    const triangle_gpu_data : [3 * 5] f32 = .{
+        1,  0, 1, 0, 0,
+        -0.5, 0.5 * @sqrt(3.0), 0, 1, 0,
+        -0.5, -0.5 * @sqrt(3.0), 0, 0, 1,
+    };
+    
+    // // Now create an array of positions for the square.
+    // const positions = [6 * 4] f32{1,  1, 0, 0, 0,  // TR
+    //                              -1,  1, 0, 0, 0,  // TL
+    //                               1, -1, 0, 0, 0,  // BR
+    //                              -1,  1, 0, 0,     // TL
+    //                               1, -1, 0, 0,     // BR
+    //                              -1, -1, 0, 0,     // BL
+    //                              };
 
-    const positions_obj = zjb.dataView(&positions);
+    const positions_obj = zjb.dataView(&triangle_gpu_data);
     defer positions_obj.release();
 
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, positions_obj, gl_STATIC_DRAW}, void);
@@ -149,7 +162,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
         2,
         gl_FLOAT,
         false,
-        0,
+        5 * @sizeOf(f32),
         0,
         }, void);
     
@@ -173,11 +186,11 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("useProgram", .{shader_program}, void);
     
     const offset = 0;
-    const vertexCount = 4;
+    const vertexCount = 3;
 
     // The Actual Drawing command!
     // gl.drawArrays(gl.TRIANGLE_STRIP, offset, vertexCount);
-    glcontext.call("drawArrays", .{gl_TRIANGLE_STRIP, offset, vertexCount}, void);
+    glcontext.call("drawArrays", .{gl_TRIANGLES, offset, vertexCount}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
