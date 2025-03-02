@@ -11,6 +11,19 @@ const alloc = std.heap.wasm_allocator;
 const PI    = std.math.pi;
 
 // Globals
+
+// GL constants... but because this is "web" programming we cannot just
+// look these up at comptime but query them at runtime.
+var gl_FLOAT            : i32 = undefined;
+var gl_COLOR_BUFFER_BIT : i32 = undefined;
+var gl_DEPTH_BUFFER_BIT : i32 = undefined;
+var gl_STATIC_DRAW      : i32 = undefined;
+var gl_ARRAY_BUFFER     : i32 = undefined;
+var gl_DEPTH_TEST       : i32 = undefined;
+var gl_LEQUAL           : i32 = undefined;
+var gl_TRIANGLES        : i32 = undefined;
+
+// Timestamp
 var last_timestamp_seconds : f64 = undefined;
 
 fn log(v: anytype) void {
@@ -38,6 +51,9 @@ export fn main() void {
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
     // glcontext.release();
 
+    // Get gl "constants"
+    set_gl_constants();
+    
     const timeline = zjb.global("document").get("timeline", zjb.Handle);
     defer timeline.release();
 
@@ -50,6 +66,17 @@ export fn main() void {
     animationFrame(timestamp);
 }
 
+fn set_gl_constants() void {
+    gl_ARRAY_BUFFER     = glcontext.get("ARRAY_BUFFER",     i32);
+    gl_STATIC_DRAW      = glcontext.get("STATIC_DRAW",      i32);
+    gl_DEPTH_TEST       = glcontext.get("DEPTH_TEST",       i32);
+    gl_LEQUAL           = glcontext.get("LEQUAL",           i32);
+    gl_COLOR_BUFFER_BIT = glcontext.get("COLOR_BUFFER_BIT", i32);
+    gl_DEPTH_BUFFER_BIT = glcontext.get("DEPTH_BUFFER_BIT", i32);
+    gl_TRIANGLES        = glcontext.get("TRIANGLES",        i32);
+    gl_FLOAT            = glcontext.get("FLOAT",            i32);
+}
+
 fn init_shaders() void {
     // Constant-function args.
     const gl_VERTEX_SHADER    = glcontext.get("VERTEX_SHADER",    i32);
@@ -58,14 +85,13 @@ fn init_shaders() void {
     const gl_LINK_STATUS      = glcontext.get("LINK_STATUS",      i32);
 
     // Setup vertex shader.
-    const vertex_shader_source_handle = zjb.string(vertex_shader_source);
+    const vertex_shader_source_handle = zjb.constString(vertex_shader_source);
     const vertex_shader = glcontext.call("createShader", .{gl_VERTEX_SHADER}, zjb.Handle);
     glcontext.call("shaderSource", .{vertex_shader, vertex_shader_source_handle}, void);
     glcontext.call("compileShader", .{vertex_shader}, void);
     
-    
     // Setup fragment Shader
-    const fragment_shader_source_handle = zjb.string(fragment_shader_source);
+    const fragment_shader_source_handle = zjb.constString(fragment_shader_source);
     const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
     glcontext.call("shaderSource", .{fragment_shader, fragment_shader_source_handle}, void);
     glcontext.call("compileShader", .{fragment_shader}, void);
@@ -99,24 +125,12 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
 
-    // TODO... move these to global variables (groan).
-    const gl_ARRAY_BUFFER     = glcontext.get("ARRAY_BUFFER",     i32);
-    const gl_STATIC_DRAW      = glcontext.get("STATIC_DRAW",      i32);
-    const gl_DEPTH_TEST       = glcontext.get("DEPTH_TEST",       i32);
-    const gl_LEQUAL           = glcontext.get("LEQUAL",           i32);
-    const gl_COLOR_BUFFER_BIT = glcontext.get("COLOR_BUFFER_BIT", i32);
-    const gl_DEPTH_BUFFER_BIT = glcontext.get("DEPTH_BUFFER_BIT", i32);
-//    const gl_TRIANGLE_STRIP   = glcontext.get("TRIANGLE_STRIP",   i32);
-    const gl_TRIANGLES        = glcontext.get("TRIANGLES",        i32);
-
-    const gl_FLOAT            = glcontext.get("FLOAT",            i32);
-    
     // If exec. gets here without errors, things are fine (probably).
 
     // Get the postion of the attribute "aVertexPosition"
     //vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
     
-    const avpos_string = zjb.string("aVertexPosition");
+    const avpos_string = zjb.constString("aVertexPosition");
     const vertex_position = glcontext.call("getAttribLocation", .{shader_program, avpos_string}, zjb.Handle);
 //    log(vertex_position); // @debug
 
@@ -130,15 +144,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
         -0.5, 0.5 * @sqrt(3.0), 0, 1, 0,
         -0.5, -0.5 * @sqrt(3.0), 0, 0, 1,
     };
-    
-    // // Now create an array of positions for the square.
-    // const positions = [6 * 4] f32{1,  1, 0, 0, 0,  // TR
-    //                              -1,  1, 0, 0, 0,  // TL
-    //                               1, -1, 0, 0, 0,  // BR
-    //                              -1,  1, 0, 0,     // TL
-    //                               1, -1, 0, 0,     // BR
-    //                              -1, -1, 0, 0,     // BL
-    //                              };
 
     const positions_obj = zjb.dataView(&triangle_gpu_data);
     defer positions_obj.release();
@@ -178,7 +183,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("enableVertexAttribArray", .{vertex_position}, void);
 
     // Set the time uniform in fragment.glsl
-    const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.string("time")}, zjb.Handle);
+    const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.constString("time")}, zjb.Handle);
 
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
     glcontext.call("uniform1f", .{time_uniform_location, time_seconds_f32}, void);
