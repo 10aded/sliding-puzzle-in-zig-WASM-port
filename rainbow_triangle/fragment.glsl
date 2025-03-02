@@ -1,12 +1,8 @@
-//#version 330
+//#version 330 es
 
 precision mediump float;
 
-uniform float time;
-
 varying vec3 Color;
-
-const float PI = 3.1415926535897932384626433832795;
 
 void main() 
 {

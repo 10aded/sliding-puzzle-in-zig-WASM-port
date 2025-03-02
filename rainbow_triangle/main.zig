@@ -8,7 +8,6 @@ const alloc = std.heap.wasm_allocator;
 
 pub const panic = zjb.panic;
 
-
 // Constants
 const PI    = std.math.pi;
 
@@ -109,9 +108,17 @@ fn init_shaders() void {
     const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
     const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
 
-    if (! vs_comp_ok) { logStr("ERROR: vertex shader failed to compile!"); }        
-    if (! fs_comp_ok) { logStr("ERROR: fragment shader failed to compile!"); }
-
+    if (! vs_comp_ok) {
+        logStr("ERROR: vertex shader failed to compile!");
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
+        log(info_log);
+    }
+    if (! fs_comp_ok) {
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
+        log(info_log);
+        logStr("ERROR: fragment shader failed to compile!");
+    }
+    
     // Link the vertex and fragment shaders.
     shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
     glcontext.call("attachShader", .{shader_program, vertex_shader}, void);
@@ -171,11 +178,11 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
     
-    const oscillating_value = 0.5 * (1 + std.math.sin(2 * PI * time_seconds));
+//    const oscillating_value = 0.5 * (1 + std.math.sin(2 * PI * time_seconds));
 
     // Render! 
-    glcontext.call("clearColor", .{oscillating_value,0.5,1,1}, void);
-    //glcontext.call("clearColor", .{0.7,0.5,1,1}, void);
+//    glcontext.call("clearColor", .{oscillating_value,0.5,1,1}, void);
+    glcontext.call("clearColor", .{0.2,0.2,0.2,1}, void);
     glcontext.call("clear", .{glcontext.get("COLOR_BUFFER_BIT", i32)}, void);
     glcontext.call("clearDepth", .{1},             void);
     glcontext.call("enable",     .{gl_DEPTH_TEST}, void);
