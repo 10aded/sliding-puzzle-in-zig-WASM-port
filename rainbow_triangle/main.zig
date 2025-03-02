@@ -112,9 +112,16 @@ fn init_shaders() void {
     if (! vs_comp_ok) { logStr("ERROR: vertex shader failed to compile!"); }        
     if (! fs_comp_ok) { logStr("ERROR: fragment shader failed to compile!"); }
 
+    // Link the vertex and fragment shaders.
     shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
     glcontext.call("attachShader", .{shader_program, vertex_shader}, void);
     glcontext.call("attachShader", .{shader_program, fragment_shader}, void);
+
+    // BEFORE we link the program, manually choose locations for the vertex attributes.
+    // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
+    glcontext.call("bindAttribLocation", .{shader_program, 0, zjb.constString("aPos")}, void);
+    glcontext.call("bindAttribLocation", .{shader_program, 1, zjb.constString("aColor")}, void);
+
     glcontext.call("linkProgram",  .{shader_program}, void);
 
     // Check that the shader_program actually linked.
@@ -145,35 +152,18 @@ fn setup_array_buffers() void {
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
-
-    // TODO: Remove looking this up by name and just use
-    // the simple integer-based vertex attrib. system.
-
-    // Get the postion of the attribute "aVertexPosition"
-    // vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-    const avpos_string = zjb.constString("aVertexPosition");
-    const vertex_position = glcontext.call("getAttribLocation", .{shader_program, avpos_string}, zjb.Handle);
-    
+    glcontext.call("enableVertexAttribArray", .{0}, void);
     glcontext.call("vertexAttribPointer", .{
-        vertex_position,
-        2,
-        gl_FLOAT,
-        false,
-        5 * @sizeOf(f32),
-        0,
+        0,         // vertexAttribNumber
+        2,         // number of components
+        gl_FLOAT,  // type
+        false,     // normalize
+        5 * @sizeOf(f32), // stride
+        0 * @sizeOf(f32), // offset
         }, void);
 
-    // gl.vertexAttribPointer(
-    //     programInfo.attribLocations.vertexPosition,
-    //     numComponents,
-    //     type,
-    //     normalize,
-    //     stride,
-    //     offset,
-    // );
-
-    glcontext.call("enableVertexAttribArray", .{vertex_position}, void);
-        
+    glcontext.call("enableVertexAttribArray", .{1}, void);
+    glcontext.call("vertexAttribPointer", .{1, 3, gl_FLOAT, false, 5 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
 }
 
 fn animationFrame(timestamp: f64) callconv(.C) void {
