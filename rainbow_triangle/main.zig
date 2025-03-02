@@ -17,6 +17,7 @@ const PI    = std.math.pi;
 var glcontext      : zjb.Handle = undefined;
 
 // Shaders
+var triangle_vbo   : zjb.Handle = undefined;
 var shader_program : zjb.Handle = undefined;
 
 // GL constants... but because this is "web" programming we cannot just
@@ -44,14 +45,15 @@ fn logStr(str: []const u8) void {
 }
 
 export fn main() void {
+    init_clock();
 
     init_webgl_context();
 
     set_gl_constants();
 
-    init_clock();
-
     init_shaders();
+
+    setup_array_buffers();
     
     logStr("Debug: Begin main loop.");
     
@@ -126,48 +128,32 @@ fn init_shaders() void {
     }
 }
 
-fn animationFrame(timestamp: f64) callconv(.C) void {
-
-    // NOTE: The timestamp is in milliseconds.
-    const time_seconds = timestamp / 1000;
-
-    // If exec. gets here without errors, things are fine (probably).
-
-    // Get the postion of the attribute "aVertexPosition"
-    //vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-    
-    const avpos_string = zjb.constString("aVertexPosition");
-    const vertex_position = glcontext.call("getAttribLocation", .{shader_program, avpos_string}, zjb.Handle);
-//    log(vertex_position); // @debug
-
-    const position_buffer = glcontext.call("createBuffer", .{}, zjb.Handle);
-
-    // gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, position_buffer}, void);
-
+fn setup_array_buffers() void {
+    // Define an equilateral RGB triangle.
     const triangle_gpu_data : [3 * 5] f32 = .{
-        1,  0, 1, 0, 0,
-        -0.5, 0.5 * @sqrt(3.0), 0, 1, 0,
+         1,    0,                1, 0, 0,
+        -0.5,  0.5 * @sqrt(3.0), 0, 1, 0,
         -0.5, -0.5 * @sqrt(3.0), 0, 0, 1,
     };
 
-    const positions_obj = zjb.dataView(&triangle_gpu_data);
-    defer positions_obj.release();
+    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
+    //    defer positions_obj.release();
+    
+    // Create (what seems to be?) the WebGL version of a VBO.
+    triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
 
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, positions_obj, gl_STATIC_DRAW}, void);
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
-//    log(position_buffer);
 
-    const oscillating_value = 0.5 * (1 + std.math.sin(2 * PI * time_seconds));
+    // TODO: Remove looking this up by name and just use
+    // the simple integer-based vertex attrib. system.
 
-    glcontext.call("clearColor", .{oscillating_value,0.5,1,1}, void);
-    glcontext.call("clear", .{glcontext.get("COLOR_BUFFER_BIT", i32)}, void);
-    glcontext.call("clearDepth", .{1},             void);
-    glcontext.call("enable",     .{gl_DEPTH_TEST}, void);
-    glcontext.call("depthFunc",  .{gl_LEQUAL},     void);
-
-    glcontext.call("clear", .{gl_COLOR_BUFFER_BIT | gl_DEPTH_BUFFER_BIT}, void);
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, position_buffer}, void);
+    // Get the postion of the attribute "aVertexPosition"
+    // vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
+    const avpos_string = zjb.constString("aVertexPosition");
+    const vertex_position = glcontext.call("getAttribLocation", .{shader_program, avpos_string}, zjb.Handle);
+    
     glcontext.call("vertexAttribPointer", .{
         vertex_position,
         2,
@@ -176,7 +162,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
         5 * @sizeOf(f32),
         0,
         }, void);
-    
+
     // gl.vertexAttribPointer(
     //     programInfo.attribLocations.vertexPosition,
     //     numComponents,
@@ -187,6 +173,25 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // );
 
     glcontext.call("enableVertexAttribArray", .{vertex_position}, void);
+        
+}
+
+fn animationFrame(timestamp: f64) callconv(.C) void {
+
+    // NOTE: The timestamp is in milliseconds.
+    const time_seconds = timestamp / 1000;
+    
+    const oscillating_value = 0.5 * (1 + std.math.sin(2 * PI * time_seconds));
+
+    // Render! 
+    glcontext.call("clearColor", .{oscillating_value,0.5,1,1}, void);
+    //glcontext.call("clearColor", .{0.7,0.5,1,1}, void);
+    glcontext.call("clear", .{glcontext.get("COLOR_BUFFER_BIT", i32)}, void);
+    glcontext.call("clearDepth", .{1},             void);
+    glcontext.call("enable",     .{gl_DEPTH_TEST}, void);
+    glcontext.call("depthFunc",  .{gl_LEQUAL},     void);
+
+    glcontext.call("clear", .{gl_COLOR_BUFFER_BIT | gl_DEPTH_BUFFER_BIT}, void);
 
     // Set the time uniform in fragment.glsl
     const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.constString("time")}, zjb.Handle);
@@ -200,7 +205,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     const vertexCount = 3;
 
     // The Actual Drawing command!
-    // gl.drawArrays(gl.TRIANGLE_STRIP, offset, vertexCount);
     glcontext.call("drawArrays", .{gl_TRIANGLES, offset, vertexCount}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
