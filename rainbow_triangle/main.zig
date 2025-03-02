@@ -6,11 +6,18 @@ const fragment_shader_source = @embedFile("fragment.glsl");
 
 const alloc = std.heap.wasm_allocator;
 
+pub const panic = zjb.panic;
+
 
 // Constants
 const PI    = std.math.pi;
 
 // Globals
+// Canvas stuff.
+var glcontext      : zjb.Handle = undefined;
+
+// Shaders
+var shader_program : zjb.Handle = undefined;
 
 // GL constants... but because this is "web" programming we cannot just
 // look these up at comptime but query them at runtime.
@@ -24,6 +31,7 @@ var gl_LEQUAL           : i32 = undefined;
 var gl_TRIANGLES        : i32 = undefined;
 
 // Timestamp
+var initial_timestamp      : f64 = undefined;
 var last_timestamp_seconds : f64 = undefined;
 
 fn log(v: anytype) void {
@@ -35,13 +43,27 @@ fn logStr(str: []const u8) void {
     zjb.global("console").call("log", .{handle}, void);
 }
 
-pub const panic = zjb.panic;
-
-var glcontext      : zjb.Handle = undefined;
-var shader_program : zjb.Handle = undefined;
-
 export fn main() void {
+
+    init_webgl_context();
+
+    set_gl_constants();
+
+    init_clock();
+
+    init_shaders();
     
+    logStr("Debug: Begin main loop.");
+    
+    animationFrame(initial_timestamp);
+}
+
+fn init_clock() void {
+    const timeline = zjb.global("document").get("timeline", zjb.Handle);
+    initial_timestamp = timeline.get("currentTime", f64);
+}
+
+fn init_webgl_context() void {
     const canvas = zjb.global("document").call("getElementById", .{zjb.constString("canvas")}, zjb.Handle);
     defer canvas.release();
 
@@ -49,21 +71,6 @@ export fn main() void {
     canvas.set("height", 500);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
-    // glcontext.release();
-
-    // Get gl "constants"
-    set_gl_constants();
-    
-    const timeline = zjb.global("document").get("timeline", zjb.Handle);
-    defer timeline.release();
-
-    const timestamp = timeline.get("currentTime", f64);
-    last_timestamp_seconds = timestamp / 1000;
-
-    init_shaders();
-    
-    logStr("\n======================== Start the main render loop.  ========================");
-    animationFrame(timestamp);
 }
 
 fn set_gl_constants() void {
@@ -120,7 +127,6 @@ fn init_shaders() void {
 }
 
 fn animationFrame(timestamp: f64) callconv(.C) void {
-
 
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
