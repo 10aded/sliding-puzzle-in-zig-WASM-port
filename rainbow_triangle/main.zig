@@ -51,7 +51,7 @@ const CANVAS_HEIGHT : i32 = 500;
 // Globals
 var glcontext      : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
-var shader_program : zjb.Handle = undefined;
+var color_vertex_shader_program : zjb.Handle = undefined;
 
 // GL constants... but because this is web "programming"
 // we cannot just embed these constants into the .wasm
@@ -157,21 +157,21 @@ fn compile_shaders() void {
     }
     
     // Try and link the vertex and fragment shaders.
-    shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{shader_program, vertex_shader},   void);
-    glcontext.call("attachShader", .{shader_program, fragment_shader}, void);
+    color_vertex_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{color_vertex_shader_program, vertex_shader},   void);
+    glcontext.call("attachShader", .{color_vertex_shader_program, fragment_shader}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
 
-    glcontext.call("bindAttribLocation", .{shader_program, 0, zjb.constString("aPos")}, void);
-    glcontext.call("bindAttribLocation", .{shader_program, 1, zjb.constString("aColor")}, void);
+    glcontext.call("bindAttribLocation", .{color_vertex_shader_program, 0, zjb.constString("aPos")}, void);
+    glcontext.call("bindAttribLocation", .{color_vertex_shader_program, 1, zjb.constString("aColor")}, void);
 
-    glcontext.call("linkProgram",  .{shader_program}, void);
+    glcontext.call("linkProgram",  .{color_vertex_shader_program}, void);
 
     // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{shader_program, gl_LINK_STATUS}, bool);
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{color_vertex_shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
         logStr("Shader linked successfully!");
@@ -183,26 +183,28 @@ fn compile_shaders() void {
 fn setup_array_buffers() void {
     // Define an equilateral RGB triangle.
     const triangle_gpu_data : [3 * 5] f32 = .{
+        // xpos, ypos,           r, g, b
          1,    0,                1, 0, 0,
         -0.5,  0.5 * @sqrt(3.0), 0, 1, 0,
         -0.5, -0.5 * @sqrt(3.0), 0, 0, 1,
     };
 
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
-    //    defer positions_obj.release();
     
-    // Create (what seems to be?) the WebGL version of a VBO.
+    // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
     triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
 
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
+    // Set the VBO attributes.
+    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
     glcontext.call("enableVertexAttribArray", .{0}, void);
     glcontext.call("vertexAttribPointer", .{
-        0,         // vertexAttribNumber
-        2,         // number of components
-        gl_FLOAT,  // type
-        false,     // normalize
+        0,                // index
+        2,                // number of components
+        gl_FLOAT,         // type
+        false,            // normalize
         5 * @sizeOf(f32), // stride
         0 * @sizeOf(f32), // offset
         }, void);
@@ -221,11 +223,11 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
     // Render the rainbow triangle.
-    glcontext.call("useProgram", .{shader_program}, void);
+    glcontext.call("useProgram", .{color_vertex_shader_program}, void);
 
     // Set the time uniform in the fragment shader.
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.constString("time")}, zjb.Handle);
+    const time_uniform_location = glcontext.call("getUniformLocation", .{color_vertex_shader_program, zjb.constString("time")}, zjb.Handle);
     glcontext.call("uniform1f", .{time_uniform_location, time_seconds_f32}, void);
     
     // The Actual Drawing command!
