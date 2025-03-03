@@ -1,42 +1,79 @@
+// An example of how to render a rainbow triangle in WebGL
+// without having to write native .js code using the zjb
+// library. (Using the library makes it possbile to call
+// .js functions from within Zig when needed.)
+//
+// Created by 10aded throughout March 2025. 
+//
+// Build this example with the command:
+//
+//     zig build rainbow_triangle -Doptimize=Fast
+//
+// run in the top directory of the project.
+//
+// This creates a static webpage in ./zig-out/bin ; to run the
+// webpage spawn a web server from within ./zig-out/bin (e.g.
+// with python via
+//
+//     python -m http.server
+//
+// and then access the url localhost:8000 in a web browser.
+//
+// Building the project requires a Zig compiler of at least
+// version 0.13.0. It can be easily and freely downloaded at:
+//
+//     https://ziglang.org/download/
+//
+// The entire source code of this project is available on GitHub at:
+//
+// TODO...
+//
+// This code heavily relies on Scott Redig's Zig Javascript
+// Bridge library (zjb), available at:
+//
+//     https://github.com/scottredig/zig-javascript-bridge
+//
+// These example and others were developed (almost) entirely
+// on the Twitch channel 10aded; copies of the stream are
+// on YouTube at the @10aded channel.
+//
+// Both libraries have MIT licenses; see the link above for details.
+
 const std = @import("std");
 const zjb = @import("zjb");
 
-const vertex_shader_source   = @embedFile("vertex.glsl");
-const fragment_shader_source = @embedFile("fragment.glsl");
+const vertex_shader_source   = @embedFile("vertex_shader.glsl");
+const fragment_shader_source = @embedFile("fragment_shader.glsl");
 
-const alloc = std.heap.wasm_allocator;
-
-pub const panic = zjb.panic;
-
-// Constants
-const PI    = std.math.pi;
+const CANVAS_WIDTH  : i32 = 500;
+const CANVAS_HEIGHT : i32 = 500;
 
 // Globals
-// Canvas stuff.
 var glcontext      : zjb.Handle = undefined;
-
-// Shaders
 var triangle_vbo   : zjb.Handle = undefined;
 var shader_program : zjb.Handle = undefined;
 
-// GL constants... but because this is "web" programming we cannot just
-// look these up at comptime but query them at runtime.
+// GL constants... but because this is web "programming"
+// we cannot just embed these constants into the .wasm
+// but need to query them at runtime.
 var gl_FLOAT            : i32 = undefined;
-var gl_COLOR_BUFFER_BIT : i32 = undefined;
-var gl_DEPTH_BUFFER_BIT : i32 = undefined;
-var gl_STATIC_DRAW      : i32 = undefined;
 var gl_ARRAY_BUFFER     : i32 = undefined;
-var gl_DEPTH_TEST       : i32 = undefined;
-var gl_LEQUAL           : i32 = undefined;
+var gl_STATIC_DRAW      : i32 = undefined;
+var gl_COLOR_BUFFER_BIT : i32 = undefined;
 var gl_TRIANGLES        : i32 = undefined;
+
+var gl_VERTEX_SHADER    : i32 = undefined;
+var gl_FRAGMENT_SHADER  : i32 = undefined;
+var gl_COMPILE_STATUS   : i32 = undefined;
+var gl_LINK_STATUS      : i32 = undefined;
 
 // Timestamp
 var initial_timestamp      : f64 = undefined;
-var last_timestamp_seconds : f64 = undefined;
 
 fn log(v: anytype) void {
     zjb.global("console").call("log", .{v}, void);
 }
+
 fn logStr(str: []const u8) void {
     const handle = zjb.string(str);
     defer handle.release();
@@ -48,9 +85,9 @@ export fn main() void {
 
     init_webgl_context();
 
-    set_gl_constants();
+    get_gl_constants();
 
-    init_shaders();
+    compile_shaders();
 
     setup_array_buffers();
     
@@ -61,6 +98,8 @@ export fn main() void {
 
 fn init_clock() void {
     const timeline = zjb.global("document").get("timeline", zjb.Handle);
+    defer timeline.release();
+    
     initial_timestamp = timeline.get("currentTime", f64);
 }
 
@@ -68,43 +107,40 @@ fn init_webgl_context() void {
     const canvas = zjb.global("document").call("getElementById", .{zjb.constString("canvas")}, zjb.Handle);
     defer canvas.release();
 
-    canvas.set("width",  500);
-    canvas.set("height", 500);
+    canvas.set("width",  CANVAS_WIDTH);
+    canvas.set("height", CANVAS_HEIGHT);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 }
 
-fn set_gl_constants() void {
+fn get_gl_constants() void {
+    gl_FLOAT            = glcontext.get("FLOAT",            i32);
     gl_ARRAY_BUFFER     = glcontext.get("ARRAY_BUFFER",     i32);
     gl_STATIC_DRAW      = glcontext.get("STATIC_DRAW",      i32);
-    gl_DEPTH_TEST       = glcontext.get("DEPTH_TEST",       i32);
-    gl_LEQUAL           = glcontext.get("LEQUAL",           i32);
     gl_COLOR_BUFFER_BIT = glcontext.get("COLOR_BUFFER_BIT", i32);
-    gl_DEPTH_BUFFER_BIT = glcontext.get("DEPTH_BUFFER_BIT", i32);
     gl_TRIANGLES        = glcontext.get("TRIANGLES",        i32);
-    gl_FLOAT            = glcontext.get("FLOAT",            i32);
+
+    gl_VERTEX_SHADER    = glcontext.get("VERTEX_SHADER",    i32);
+    gl_FRAGMENT_SHADER  = glcontext.get("FRAGMENT_SHADER",  i32);
+    gl_COMPILE_STATUS   = glcontext.get("COMPILE_STATUS",   i32);
+    gl_LINK_STATUS      = glcontext.get("LINK_STATUS",      i32);
 }
 
-fn init_shaders() void {
-    // Constant-function args.
-    const gl_VERTEX_SHADER    = glcontext.get("VERTEX_SHADER",    i32);
-    const gl_FRAGMENT_SHADER  = glcontext.get("FRAGMENT_SHADER",  i32);
-    const gl_COMPILE_STATUS   = glcontext.get("COMPILE_STATUS",   i32);
-    const gl_LINK_STATUS      = glcontext.get("LINK_STATUS",      i32);
-
-    // Setup vertex shader.
-    const vertex_shader_source_handle = zjb.constString(vertex_shader_source);
-    const vertex_shader = glcontext.call("createShader", .{gl_VERTEX_SHADER}, zjb.Handle);
-    glcontext.call("shaderSource", .{vertex_shader, vertex_shader_source_handle}, void);
-    glcontext.call("compileShader", .{vertex_shader}, void);
-    
-    // Setup fragment Shader
+fn compile_shaders() void {
+    // Try compiling the vertex and fragment shaders.
+    const vertex_shader_source_handle   = zjb.constString(vertex_shader_source);
     const fragment_shader_source_handle = zjb.constString(fragment_shader_source);
+
+    const vertex_shader   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
     const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
+
+    glcontext.call("shaderSource", .{vertex_shader, vertex_shader_source_handle}, void);
     glcontext.call("shaderSource", .{fragment_shader, fragment_shader_source_handle}, void);
+    
+    glcontext.call("compileShader", .{vertex_shader},   void);
     glcontext.call("compileShader", .{fragment_shader}, void);
 
-    // Check to see that the vertex shader and fragment shader compiled.
+    // Check to see that the vertex and fragment shaders compiled.
     const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
     const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
 
@@ -113,26 +149,28 @@ fn init_shaders() void {
         const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
         log(info_log);
     }
+    
     if (! fs_comp_ok) {
         const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
         log(info_log);
         logStr("ERROR: fragment shader failed to compile!");
     }
     
-    // Link the vertex and fragment shaders.
+    // Try and link the vertex and fragment shaders.
     shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{shader_program, vertex_shader}, void);
+    glcontext.call("attachShader", .{shader_program, vertex_shader},   void);
     glcontext.call("attachShader", .{shader_program, fragment_shader}, void);
 
-    // BEFORE we link the program, manually choose locations for the vertex attributes.
+    // NOTE: Before we link the program, we need to manually choose the locations
+    // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
+
     glcontext.call("bindAttribLocation", .{shader_program, 0, zjb.constString("aPos")}, void);
     glcontext.call("bindAttribLocation", .{shader_program, 1, zjb.constString("aColor")}, void);
 
     glcontext.call("linkProgram",  .{shader_program}, void);
 
-    // Check that the shader_program actually linked.
-
+    // Check that the shaders linked.
     const shader_linked_ok = glcontext.call("getProgramParameter", .{shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
@@ -178,31 +216,20 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
     
-//    const oscillating_value = 0.5 * (1 + std.math.sin(2 * PI * time_seconds));
+    // Render the background color.
+    glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
+    glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
-    // Render! 
-//    glcontext.call("clearColor", .{oscillating_value,0.5,1,1}, void);
-    glcontext.call("clearColor", .{0.2,0.2,0.2,1}, void);
-    glcontext.call("clear", .{glcontext.get("COLOR_BUFFER_BIT", i32)}, void);
-    glcontext.call("clearDepth", .{1},             void);
-    glcontext.call("enable",     .{gl_DEPTH_TEST}, void);
-    glcontext.call("depthFunc",  .{gl_LEQUAL},     void);
+    // Render the rainbow triangle.
+    glcontext.call("useProgram", .{shader_program}, void);
 
-    glcontext.call("clear", .{gl_COLOR_BUFFER_BIT | gl_DEPTH_BUFFER_BIT}, void);
-
-    // Set the time uniform in fragment.glsl
-    const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.constString("time")}, zjb.Handle);
-
+    // Set the time uniform in the fragment shader.
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
+    const time_uniform_location = glcontext.call("getUniformLocation", .{shader_program, zjb.constString("time")}, zjb.Handle);
     glcontext.call("uniform1f", .{time_uniform_location, time_seconds_f32}, void);
     
-    glcontext.call("useProgram", .{shader_program}, void);
-    
-    const offset = 0;
-    const vertexCount = 3;
-
     // The Actual Drawing command!
-    glcontext.call("drawArrays", .{gl_TRIANGLES, offset, vertexCount}, void);
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 3}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
