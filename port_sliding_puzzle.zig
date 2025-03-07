@@ -314,6 +314,8 @@ fn compile_pluto_shader() void {
         const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
         log(info_log);
         logStr("ERROR: fragment shader failed to compile!");
+    } else {
+        logStr("Debug: fragment shader successfully compiled!");        
     }
     
     // Try and link the vertex and fragment shaders.
@@ -326,8 +328,10 @@ fn compile_pluto_shader() void {
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
 
     glcontext.call("bindAttribLocation", .{pluto_shader_program, 0, zjb.constString("aPos")}, void);
-    glcontext.call("bindAttribLocation", .{pluto_shader_program, 1, zjb.constString("aTexCoord")}, void);
-
+    glcontext.call("bindAttribLocation", .{pluto_shader_program, 1, zjb.constString("aColor")}, void);
+    glcontext.call("bindAttribLocation", .{pluto_shader_program, 2, zjb.constString("aTexCoord")}, void);
+    glcontext.call("bindAttribLocation", .{pluto_shader_program, 3, zjb.constString("aLambda")}, void);
+    
     glcontext.call("linkProgram",  .{pluto_shader_program}, void);
 
     // Check that the shaders linked.
@@ -339,9 +343,6 @@ fn compile_pluto_shader() void {
         logStr("ERROR: Shader failed to link!");
     }
 }
-
-
-
 
 
 fn setup_background_array_buffer() void {
@@ -380,14 +381,14 @@ fn setup_background_array_buffer() void {
 
 fn setup_pluto_array_buffer() void {
     // Define an equilateral RGB triangle.
-        const triangle_gpu_data : [6 * 4] f32 = .{
-            // xpos, ypos, xtex, ytex,
-             1,  1,  1, 0,// RT
-            -1,  1,  0, 0,// LT
-             1, -1,  1, 1,// RB
-            -1,  1,  0, 0,// LT
-             1, -1,  1, 1,// RB
-            -1, -1,  0, 1,// LB
+        const triangle_gpu_data : [6 * 8] f32 = .{
+            // x, y, r, g, b, tx, ty, l,
+             1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
+            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+            -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
     };
     
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
@@ -399,19 +400,17 @@ fn setup_pluto_array_buffer() void {
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
-    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
-    glcontext.call("enableVertexAttribArray", .{0}, void);
-    glcontext.call("vertexAttribPointer", .{
-        0,                // index
-        2,                // number of components
-        gl_FLOAT,         // type
-        false,            // normalize
-        4 * @sizeOf(f32), // stride
-        0 * @sizeOf(f32), // offset
-        }, void);
+    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders.
 
+    glcontext.call("enableVertexAttribArray", .{0}, void);
     glcontext.call("enableVertexAttribArray", .{1}, void);
-    glcontext.call("vertexAttribPointer", .{1, 2, gl_FLOAT, false, 4 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
+    glcontext.call("enableVertexAttribArray", .{2}, void);
+    glcontext.call("enableVertexAttribArray", .{3}, void);
+
+    glcontext.call("vertexAttribPointer", .{0, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 0 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{1, 3, gl_FLOAT, false, 8 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{2, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 5 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{3, 1, gl_FLOAT, false, 8 * @sizeOf(f32), 7 * @sizeOf(f32)}, void);
 
     // Setup blue marble texture.
     blue_marble_texture = glcontext.call("createTexture", .{}, zjb.Handle);
