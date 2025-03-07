@@ -6,7 +6,7 @@ const env = {
 var zjb = new Zjb();
 
 (function() {
-	WebAssembly.instantiateStreaming(fetch("rainbow_triangle.wasm"), {env: env, zjb: zjb.imports}).then(function (results) {
+	WebAssembly.instantiateStreaming(fetch("port_sliding_puzzle.wasm"), {env: env, zjb: zjb.imports}).then(function (results) {
 		zjb.instance = results.instance;
 		results.instance.exports.main();
 	});

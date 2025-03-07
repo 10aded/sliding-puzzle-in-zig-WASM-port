@@ -1,4 +1,4 @@
-// An example of how to render a rainbow triangle in WebGL
+// An example of how to render a looping fractal in WebGL
 // without having to write native .js code using the zjb
 // library. (Using the library makes it possbile to call
 // .js functions from within Zig when needed.)
@@ -7,7 +7,7 @@
 //
 // Build this example with the command:
 //
-//     zig build rainbow_triangle -Doptimize=Fast
+//     zig build looping_fractal -Doptimize=Fast
 //
 // run in the top directory of the project.
 //
@@ -26,24 +26,25 @@
 //
 // The entire source code of this project is available on GitHub at:
 //
-// TODO...
+//     https://github.com/10aded/Zig-WebGL-WASM-Examples
 //
 // This code heavily relies on Scott Redig's Zig Javascript
 // Bridge library (zjb), available at:
 //
 //     https://github.com/scottredig/zig-javascript-bridge
 //
+// Zjb has a MIT license, see the link / included dependency
+// for more details.
+//
 // These example and others were developed (almost) entirely
 // on the Twitch channel 10aded; copies of the stream are
 // on YouTube at the @10aded channel.
-//
-// Both libraries have MIT licenses; see the link above for details.
 
 const std = @import("std");
 const zjb = @import("zjb");
 
-const vertex_shader_source   = @embedFile("vertex_shader.glsl");
-const fragment_shader_source = @embedFile("fragment_shader.glsl");
+const vertex_shader_source   = @embedFile("./Shaders/vertex_shader.glsl");
+const fragment_shader_source = @embedFile("./Shaders/fragment_shader.glsl");
 
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
@@ -51,21 +52,20 @@ const CANVAS_HEIGHT : i32 = 500;
 // Globals
 var glcontext      : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
-var color_vertex_shader_program : zjb.Handle = undefined;
+var fractal_shader_program : zjb.Handle = undefined;
 
-// GL constants... but because this is web "programming"
-// we cannot just embed these constants into the .wasm
-// but need to query them at runtime.
-var gl_FLOAT            : i32 = undefined;
-var gl_ARRAY_BUFFER     : i32 = undefined;
-var gl_STATIC_DRAW      : i32 = undefined;
-var gl_COLOR_BUFFER_BIT : i32 = undefined;
-var gl_TRIANGLES        : i32 = undefined;
+// WebGL constants obtained from the WebGL specification at:
+// https://registry.khronos.org/webgl/specs/1.0.0/
+const gl_FLOAT            : i32 = 0x1406; 
+const gl_ARRAY_BUFFER     : i32 = 0x8892;
+const gl_STATIC_DRAW      : i32 = 0x88E4;
+const gl_COLOR_BUFFER_BIT : i32 = 0x4000;
+const gl_TRIANGLES        : i32 = 0x0004;
 
-var gl_VERTEX_SHADER    : i32 = undefined;
-var gl_FRAGMENT_SHADER  : i32 = undefined;
-var gl_COMPILE_STATUS   : i32 = undefined;
-var gl_LINK_STATUS      : i32 = undefined;
+const gl_VERTEX_SHADER    : i32 = 0x8B31;
+const gl_FRAGMENT_SHADER  : i32 = 0x8B30;
+const gl_COMPILE_STATUS   : i32 = 0x8B81;
+const gl_LINK_STATUS      : i32 = 0x8B82;
 
 // Timestamp
 var initial_timestamp      : f64 = undefined;
@@ -84,8 +84,6 @@ export fn main() void {
     init_clock();
 
     init_webgl_context();
-
-    get_gl_constants();
 
     compile_shaders();
 
@@ -111,19 +109,6 @@ fn init_webgl_context() void {
     canvas.set("height", CANVAS_HEIGHT);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
-}
-
-fn get_gl_constants() void {
-    gl_FLOAT            = glcontext.get("FLOAT",            i32);
-    gl_ARRAY_BUFFER     = glcontext.get("ARRAY_BUFFER",     i32);
-    gl_STATIC_DRAW      = glcontext.get("STATIC_DRAW",      i32);
-    gl_COLOR_BUFFER_BIT = glcontext.get("COLOR_BUFFER_BIT", i32);
-    gl_TRIANGLES        = glcontext.get("TRIANGLES",        i32);
-
-    gl_VERTEX_SHADER    = glcontext.get("VERTEX_SHADER",    i32);
-    gl_FRAGMENT_SHADER  = glcontext.get("FRAGMENT_SHADER",  i32);
-    gl_COMPILE_STATUS   = glcontext.get("COMPILE_STATUS",   i32);
-    gl_LINK_STATUS      = glcontext.get("LINK_STATUS",      i32);
 }
 
 fn compile_shaders() void {
@@ -157,36 +142,38 @@ fn compile_shaders() void {
     }
     
     // Try and link the vertex and fragment shaders.
-    color_vertex_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{color_vertex_shader_program, vertex_shader},   void);
-    glcontext.call("attachShader", .{color_vertex_shader_program, fragment_shader}, void);
+    fractal_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{fractal_shader_program, vertex_shader},   void);
+    glcontext.call("attachShader", .{fractal_shader_program, fragment_shader}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
 
-    glcontext.call("bindAttribLocation", .{color_vertex_shader_program, 0, zjb.constString("aPos")}, void);
-    glcontext.call("bindAttribLocation", .{color_vertex_shader_program, 1, zjb.constString("aColor")}, void);
+    glcontext.call("bindAttribLocation", .{fractal_shader_program, 0, zjb.constString("aPos")}, void);
 
-    glcontext.call("linkProgram",  .{color_vertex_shader_program}, void);
+    glcontext.call("linkProgram",  .{fractal_shader_program}, void);
 
     // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{color_vertex_shader_program, gl_LINK_STATUS}, bool);
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{fractal_shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
-        logStr("Shader linked successfully!");
+        logStr("Debug: Shader linked successfully!");
     } else {
         logStr("ERROR: Shader failed to link!");
     }
 }
 
 fn setup_array_buffers() void {
-    // Define an equilateral RGB triangle.
-    const triangle_gpu_data : [3 * 5] f32 = .{
-        // xpos, ypos,           r, g, b
-         1,    0,                1, 0, 0,
-        -0.5,  0.5 * @sqrt(3.0), 0, 1, 0,
-        -0.5, -0.5 * @sqrt(3.0), 0, 0, 1,
+    // Define an rectangle to draw the fractal shader on.
+    const triangle_gpu_data : [6 * 2] f32 = .{
+        // xpos, ypos
+         1,  1,  // RT
+        -1,  1,  // LT
+         1, -1,  // RB
+        -1,  1,  // LT
+         1, -1,  // RB
+        -1, -1,  // LB
     };
 
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
@@ -205,12 +192,9 @@ fn setup_array_buffers() void {
         2,                // number of components
         gl_FLOAT,         // type
         false,            // normalize
-        5 * @sizeOf(f32), // stride
+        2 * @sizeOf(f32), // stride
         0 * @sizeOf(f32), // offset
         }, void);
-
-    glcontext.call("enableVertexAttribArray", .{1}, void);
-    glcontext.call("vertexAttribPointer", .{1, 3, gl_FLOAT, false, 5 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
 }
 
 fn animationFrame(timestamp: f64) callconv(.C) void {
@@ -223,15 +207,15 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
     // Render the rainbow triangle.
-    glcontext.call("useProgram", .{color_vertex_shader_program}, void);
+    glcontext.call("useProgram", .{fractal_shader_program}, void);
 
     // Set the time uniform in the fragment shader.
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const time_uniform_location = glcontext.call("getUniformLocation", .{color_vertex_shader_program, zjb.constString("time")}, zjb.Handle);
+    const time_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("time")}, zjb.Handle);
     glcontext.call("uniform1f", .{time_uniform_location, time_seconds_f32}, void);
     
     // The Actual Drawing command!
-    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 3}, void);
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }

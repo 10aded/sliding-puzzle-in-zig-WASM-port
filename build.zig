@@ -6,28 +6,28 @@ pub fn build(b: *std.Build) void {
 
     const zjb = b.dependency("zjb", .{});
 
-    const rainbow_triangle = b.addExecutable(.{
-        .name = "rainbow_triangle",
-        .root_source_file = b.path("rainbow_triangle/main.zig"),
+    const sliding_puzzle = b.addExecutable(.{
+        .name = "port_sliding_puzzle",
+        .root_source_file = b.path("port_sliding_puzzle.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding }),
         .optimize = optimize,
     });
-    rainbow_triangle.root_module.addImport("zjb", zjb.module("zjb"));
-    rainbow_triangle.entry = .disabled;
-    rainbow_triangle.rdynamic = true;
+    sliding_puzzle.root_module.addImport("zjb", zjb.module("zjb"));
+    sliding_puzzle.entry = .disabled;
+    sliding_puzzle.rdynamic = true;
 
-    const extract_rainbow_triangle = b.addRunArtifact(zjb.artifact("generate_js"));
-    const extract_rainbow_triangle_out = extract_rainbow_triangle.addOutputFileArg("zjb_extract.js");
-    extract_rainbow_triangle.addArg("Zjb"); // Name of js class.
-    extract_rainbow_triangle.addArtifactArg(rainbow_triangle);
+    const extract_sliding_puzzle = b.addRunArtifact(zjb.artifact("generate_js"));
+    const extract_sliding_puzzle_out = extract_sliding_puzzle.addOutputFileArg("zjb_extract.js");
+    extract_sliding_puzzle.addArg("Zjb"); // Name of js class.
+    extract_sliding_puzzle.addArtifactArg(sliding_puzzle);
 
-    const rainbow_triangle_step = b.step("rainbow_triangle", "Build the hello Zig example");
-    rainbow_triangle_step.dependOn(&b.addInstallArtifact(rainbow_triangle, .{
+    const sliding_puzzle_step = b.step("sliding_puzzle", "Build the sliding puzzle static website");
+    sliding_puzzle_step.dependOn(&b.addInstallArtifact(sliding_puzzle, .{
         .dest_dir = .{ .override = dir },
     }).step);
-    rainbow_triangle_step.dependOn(&b.addInstallFileWithDir(extract_rainbow_triangle_out, dir, "zjb_extract.js").step);
-    rainbow_triangle_step.dependOn(&b.addInstallDirectory(.{
-        .source_dir = b.path("rainbow_triangle/static"),
+    sliding_puzzle_step.dependOn(&b.addInstallFileWithDir(extract_sliding_puzzle_out, dir, "zjb_extract.js").step);
+    sliding_puzzle_step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = b.path("static"),
         .install_dir = dir,
         .install_subdir = "",
     }).step);
