@@ -42,9 +42,13 @@
 
 const std = @import("std");
 const zjb = @import("zjb");
+const qoi = @import("./Dependencies/qoi.zig");
 
 const vertex_background_source   = @embedFile("./Shaders/vertex-background.glsl");
 const fragment_background_source = @embedFile("./Shaders/fragment-background.glsl");
+
+const vertex_color_texture_source   = @embedFile("./Shaders/vertex-color-texture.glsl");
+const fragment_color_texture_source = @embedFile("./Shaders/fragment-color-texture.glsl");
 
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
@@ -52,6 +56,10 @@ const CANVAS_HEIGHT : i32 = 500;
 // Constants
 const PI : f32 = std.math.pi;
 const BACKGROUND_SHADER_SHAPE_CHANGE_TIME = 200;
+
+// Type aliases.
+const Color = @Vector(4, u8);
+
 
 // WebGL constants obtained from the WebGL specification at:
 // https://registry.khronos.org/webgl/specs/1.0.0/
@@ -66,6 +74,21 @@ const gl_FRAGMENT_SHADER  : i32 = 0x8B30;
 const gl_COMPILE_STATUS   : i32 = 0x8B81;
 const gl_LINK_STATUS      : i32 = 0x8B82;
 
+const gl_TEXTURE0           : i32 = 0x84C0;
+const gl_TEXTURE_2D         : i32 = 0x0DE1;
+const gl_TEXTURE_WRAP_S     : i32 = 0x2802;
+const gl_TEXTURE_WRAP_T     : i32 = 0x2803;
+const gl_CLAMP_TO_EDGE      : i32 = 0x812F;
+const gl_TEXTURE_MAG_FILTER : i32 = 0x2800;
+const gl_TEXTURE_MIN_FILTER : i32 = 0x2801;
+const gl_NEAREST            : i32 = 0x2600;
+
+const gl_RGBA               : i32 = 0x1908;
+const gl_UNSIGNED_BYTE      : i32 = 0x1401; // NOTE below!
+
+// NOTE: in WebGL specification,  UNSIGNED_BYTE is commented out in
+// /* PixelType */, the constant still seems to work though.
+
 // Globals
 // Game logic.
 var is_won = false;
@@ -74,6 +97,8 @@ var is_won = false;
 var glcontext      : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
 var background_shader_program : zjb.Handle = undefined;
+var pluto_shader_program : zjb.Handle = undefined;
+var pluto_texture  : zjb.Handle = undefined;
 
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
@@ -100,15 +125,43 @@ fn logStr(str: []const u8) void {
     zjb.global("console").call("log", .{handle}, void);
 }
 
+// The photo of Pluto below was taken by the New Horizons spacecraft,
+// see the header of this file for more information.
+const pluto_qoi = @embedFile("./Assets/pluto_new_horizons.qoi");
+const pluto_header = qoi.comptime_header_parser(pluto_qoi);
+const pluto_width  = pluto_header.image_width;
+const pluto_height = pluto_header.image_height;
+
+// TODO: In order to call gl.texImage2D to make a texture,
+// the bytes need to be in a Uint8Array (when gl.UNSIGNED_BYTE) is
+// called. (See: https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/texImage2D)
+// So, without knowing if the WASM will store @Vector(4, u8) in the
+// packed way as in x86_64, here were first decompress the .qoi
+// into an array of @Vector(4, u8), then convert it to a [] u8.
+// It would be EASY to modify the qoi decompressor to directly
+// convert it to [] u8 but this is what we're doing for now!
+
+// NOTE: As of Zig 0.13.0, upon trying to @ptrCast([] Vec(4, u8)) to
+// [] u8 ... if this is even sensible to begin with... we get a
+// TODO: implement @ptrCast between slices changing the length compile error.
+
+var pluto_pixels : [pluto_width * pluto_height] Color = undefined;
+var pluto_pixel_bytes : [4 * pluto_width * pluto_height] u8 = undefined;
+
+
 export fn main() void {
     init_clock();
 
+    decompress_pluto();
+    
     init_webgl_context();
 
     //compile_background_shader();
     //setup_background_array_buffer();
 
-    // TODO... Pluto example
+    compile_pluto_shader();
+
+    setup_pluto_array_buffer();
     
     logStr("Debug: Begin main loop.");
     
@@ -121,6 +174,18 @@ fn init_clock() void {
     
     initial_timestamp = timeline.get("currentTime", f64);
 }
+
+fn decompress_pluto() void {
+    qoi.qoi_to_pixels(pluto_qoi, pluto_width * pluto_height, &pluto_pixels);
+
+    for (pluto_pixels, 0..) |pixel, i| {
+        pluto_pixel_bytes[4 * i + 0] = pixel[0];
+        pluto_pixel_bytes[4 * i + 1] = pixel[1];
+        pluto_pixel_bytes[4 * i + 2] = pixel[2];
+        pluto_pixel_bytes[4 * i + 3] = pixel[3];
+    }
+}
+
 
 fn init_webgl_context() void {
     const canvas = zjb.global("document").call("getElementById", .{zjb.constString("canvas")}, zjb.Handle);
@@ -185,6 +250,66 @@ fn compile_background_shader() void {
     }
 }
 
+fn compile_pluto_shader() void {
+    // Try compiling the vertex and fragment shaders.
+    const vertex_color_texture_source_handle   = zjb.constString(vertex_color_texture_source);
+    const fragment_color_texture_source_handle = zjb.constString(fragment_color_texture_source);
+
+    const vertex_shader   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
+    const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
+
+    glcontext.call("shaderSource", .{vertex_shader, vertex_color_texture_source_handle}, void);
+    glcontext.call("shaderSource", .{fragment_shader, fragment_color_texture_source_handle}, void);
+    
+    glcontext.call("compileShader", .{vertex_shader},   void);
+    glcontext.call("compileShader", .{fragment_shader}, void);
+
+    // Check to see that the vertex and fragment shaders compiled.
+    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
+    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
+
+    if (! vs_comp_ok) {
+        logStr("ERROR: vertex shader failed to compile!");
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
+        log(info_log);
+    } else {
+        logStr("Debug: vertex shader successfully compiled!");        
+    }
+    
+    if (! fs_comp_ok) {
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
+        log(info_log);
+        logStr("ERROR: fragment shader failed to compile!");
+    }
+    
+    // Try and link the vertex and fragment shaders.
+    pluto_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{pluto_shader_program, vertex_shader},   void);
+    glcontext.call("attachShader", .{pluto_shader_program, fragment_shader}, void);
+
+    // NOTE: Before we link the program, we need to manually choose the locations
+    // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
+    // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
+
+    glcontext.call("bindAttribLocation", .{pluto_shader_program, 0, zjb.constString("aPos")}, void);
+    glcontext.call("bindAttribLocation", .{pluto_shader_program, 1, zjb.constString("aTexCoord")}, void);
+
+    glcontext.call("linkProgram",  .{pluto_shader_program}, void);
+
+    // Check that the shaders linked.
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{pluto_shader_program, gl_LINK_STATUS}, bool);
+
+    if (shader_linked_ok) {
+        logStr("Debug: Shader linked successfully!");
+    } else {
+        logStr("ERROR: Shader failed to link!");
+    }
+}
+
+
+
+
+
 fn setup_background_array_buffer() void {
     // Define an rectangle to draw the fractal shader on.
     const triangle_gpu_data : [6 * 2] f32 = .{
@@ -218,11 +343,73 @@ fn setup_background_array_buffer() void {
         }, void);
 }
 
+
+fn setup_pluto_array_buffer() void {
+    // Define an equilateral RGB triangle.
+        const triangle_gpu_data : [6 * 4] f32 = .{
+            // xpos, ypos, xtex, ytex,
+             1,  1,  1, 0,// RT
+            -1,  1,  0, 0,// LT
+             1, -1,  1, 1,// RB
+            -1,  1,  0, 0,// LT
+             1, -1,  1, 1,// RB
+            -1, -1,  0, 1,// LB
+    };
+    
+    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
+    
+    // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
+    triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
+
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
+
+    // Set the VBO attributes.
+    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
+    glcontext.call("enableVertexAttribArray", .{0}, void);
+    glcontext.call("vertexAttribPointer", .{
+        0,                // index
+        2,                // number of components
+        gl_FLOAT,         // type
+        false,            // normalize
+        4 * @sizeOf(f32), // stride
+        0 * @sizeOf(f32), // offset
+        }, void);
+
+    glcontext.call("enableVertexAttribArray", .{1}, void);
+    glcontext.call("vertexAttribPointer", .{1, 2, gl_FLOAT, false, 4 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
+
+    // Setup pluto texture.
+    pluto_texture = glcontext.call("createTexture", .{}, zjb.Handle);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, pluto_texture}, void);
+
+    // NOTE: The WebGL specification does NOT define CLAMP_TO_BORDER... weird.
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_WRAP_S, gl_CLAMP_TO_EDGE}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_WRAP_T, gl_CLAMP_TO_EDGE}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_MIN_FILTER, gl_NEAREST}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_MAG_FILTER, gl_NEAREST}, void);
+        
+    // Note: The width and height have type "GLsizei"... i.e. a i32.
+    const bm_width  : i32 = @intCast(pluto_width);
+    const bm_height : i32 = @intCast(pluto_height);
+
+    // !!! VERY IMPORTANT !!!
+    // gl.texImage2D accepts a pixel source ONLY with type "Uint8Array". As such,
+    // applying a zjb.dataView() to the pixels will result in NO texture being drawn.
+    // Instead, use zjb.u8ArrayView().
+    //
+    // We spent something like 2 hours debugging this. Worst debugging experience of 2025 so far.
+    
+    const pixel_data_obj = zjb.u8ArrayView(&pluto_pixel_bytes);
+    
+    glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, bm_width, bm_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, pixel_data_obj}, void);
+}
+
+
 fn animationFrame(timestamp: f64) callconv(.C) void {
 
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
-    _ = time_seconds;
     
     // Render the background color.
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
@@ -252,7 +439,32 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // // The Actual Drawing command!
     // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
+
+
+
+
+    // Render the photo!
+    glcontext.call("useProgram", .{pluto_shader_program}, void);
+
+    // Let the lambda uniform, which adjusts how gray the image is.    
+    const time_seconds_f32 : f32 = @floatCast(time_seconds);
+    const speed = 4;
+    const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
+    const lambda = osc * osc;
+
+    const lambda_uniform_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("lambda")}, zjb.Handle);
+
+    glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
+
+    // Make the GPU use the pluto texture.
+    glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, pluto_texture}, void);
+
+    const pluto_texture_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
+    glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
     
+    // Draw the dwarf planet!
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
