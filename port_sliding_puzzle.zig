@@ -43,8 +43,8 @@
 const std = @import("std");
 const zjb = @import("zjb");
 
-const vertex_shader_source   = @embedFile("./Shaders/vertex_shader.glsl");
-const fragment_shader_source = @embedFile("./Shaders/fragment_shader.glsl");
+const vertex_shader_source   = @embedFile("./Shaders/vertex-background.glsl");
+const fragment_shader_source = @embedFile("./Shaders/fragment-background.glsl");
 
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
