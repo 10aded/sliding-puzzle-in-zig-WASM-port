@@ -43,8 +43,8 @@
 const std = @import("std");
 const zjb = @import("zjb");
 
-const vertex_shader_source   = @embedFile("./Shaders/vertex-background.glsl");
-const fragment_shader_source = @embedFile("./Shaders/fragment-background.glsl");
+const vertex_background_source   = @embedFile("./Shaders/vertex-background.glsl");
+const fragment_background_source = @embedFile("./Shaders/fragment-background.glsl");
 
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
@@ -133,38 +133,38 @@ fn init_webgl_context() void {
 
 fn compile_shaders() void {
     // Try compiling the vertex and fragment shaders.
-    const vertex_shader_source_handle   = zjb.constString(vertex_shader_source);
-    const fragment_shader_source_handle = zjb.constString(fragment_shader_source);
+    const vertex_background_source_handle   = zjb.constString(vertex_background_source);
+    const fragment_background_source_handle = zjb.constString(fragment_background_source);
 
-    const vertex_shader   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
-    const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
+    const vertex_background   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
+    const fragment_background = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
 
-    glcontext.call("shaderSource", .{vertex_shader, vertex_shader_source_handle}, void);
-    glcontext.call("shaderSource", .{fragment_shader, fragment_shader_source_handle}, void);
+    glcontext.call("shaderSource", .{vertex_background, vertex_background_source_handle}, void);
+    glcontext.call("shaderSource", .{fragment_background, fragment_background_source_handle}, void);
     
-    glcontext.call("compileShader", .{vertex_shader},   void);
-    glcontext.call("compileShader", .{fragment_shader}, void);
+    glcontext.call("compileShader", .{vertex_background},   void);
+    glcontext.call("compileShader", .{fragment_background}, void);
 
     // Check to see that the vertex and fragment shaders compiled.
-    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
-    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
+    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_background,   gl_COMPILE_STATUS}, bool);
+    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_background, gl_COMPILE_STATUS}, bool);
 
     if (! vs_comp_ok) {
         logStr("ERROR: vertex shader failed to compile!");
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_background}, zjb.Handle);
         log(info_log);
     }
     
     if (! fs_comp_ok) {
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_background}, zjb.Handle);
         log(info_log);
         logStr("ERROR: fragment shader failed to compile!");
     }
     
     // Try and link the vertex and fragment shaders.
     fractal_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{fractal_shader_program, vertex_shader},   void);
-    glcontext.call("attachShader", .{fractal_shader_program, fragment_shader}, void);
+    glcontext.call("attachShader", .{fractal_shader_program, vertex_background},   void);
+    glcontext.call("attachShader", .{fractal_shader_program, fragment_background}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
