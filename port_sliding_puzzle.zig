@@ -11,6 +11,14 @@
 //
 // run in the top directory of the project.
 //
+// NOTE: In Zig 0.13.0, compiling the project in .Debug mode FAILS!
+//
+// (A runtime "index out of bounds" error ensures. This, bizarrely,
+// does not occur when compiler in .ReleaseSafe or .ReleaseFast.)
+//
+// By reducing the size of the .qoi files enough, the project
+// can compile in .Debug mode.
+//
 // This creates a static webpage in ./zig-out/bin ; to run the
 // webpage spawn a web server from within ./zig-out/bin (e.g.
 // with python via
@@ -97,8 +105,11 @@ var is_won = false;
 var glcontext      : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
 var background_shader_program : zjb.Handle = undefined;
+
 var pluto_shader_program : zjb.Handle = undefined;
-var pluto_texture  : zjb.Handle = undefined;
+
+var blue_marble_texture  : zjb.Handle = undefined;
+var quote_texture  : zjb.Handle = undefined;
 
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
@@ -127,12 +138,19 @@ fn logStr(str: []const u8) void {
 
 // The photo of Pluto below was taken by the New Horizons spacecraft,
 // see the header of this file for more information.
-//const pluto_qoi = @embedFile("./Assets/blue_marble.qoi");
-//const pluto_qoi = @embedFile("./Assets/pluto_new_horizons.qoi");
-const pluto_qoi = @embedFile("./Assets/blue_marble_480.qoi");
-const pluto_header = qoi.comptime_header_parser(pluto_qoi);
-const pluto_width  = pluto_header.image_width;
-const pluto_height = pluto_header.image_height;
+const blue_marble_qoi = @embedFile("./Assets/blue_marble_240.qoi");
+const blue_marble_header = qoi.comptime_header_parser(blue_marble_qoi);
+const blue_marble_width  = blue_marble_header.image_width;
+const blue_marble_height = blue_marble_header.image_height;
+var blue_marble_pixels : [blue_marble_width * blue_marble_height] Color = undefined;
+var blue_marble_pixel_bytes : [4 * blue_marble_width * blue_marble_height] u8 = undefined;
+
+const quote_qoi = @embedFile("./Assets/quote.qoi");
+const quote_header = qoi.comptime_header_parser(quote_qoi);
+const quote_width  = quote_header.image_width;
+const quote_height = quote_header.image_height;
+var quote_pixels : [quote_width * quote_height] Color = undefined;
+var quote_pixel_bytes : [4 * quote_width * quote_height] u8 = undefined;
 
 // TODO: In order to call gl.texImage2D to make a texture,
 // the bytes need to be in a Uint8Array (when gl.UNSIGNED_BYTE) is
@@ -147,8 +165,7 @@ const pluto_height = pluto_header.image_height;
 // [] u8 ... if this is even sensible to begin with... we get a
 // TODO: implement @ptrCast between slices changing the length compile error.
 
-var pluto_pixels : [pluto_width * pluto_height] Color = undefined;
-var pluto_pixel_bytes : [4 * pluto_width * pluto_height] u8 = undefined;
+
 
 
 export fn main() void {
@@ -156,8 +173,6 @@ export fn main() void {
     logStr("DEBUG: Program start!"); //@debug
     
     init_clock();
-
-    logStr("DEBUG: Clock init!"); //@debug
 
     decompress_pluto();
     
@@ -183,17 +198,25 @@ fn init_clock() void {
 }
 
 fn decompress_pluto() void {
-    //    logStr("DEBUG: Attempting decompression...");
+    logStr("DEBUG: Attempting decompression...");
     
-    qoi.qoi_to_pixels(pluto_qoi, pluto_width * pluto_height, &pluto_pixels);
+    qoi.qoi_to_pixels(blue_marble_qoi, blue_marble_width * blue_marble_height, &blue_marble_pixels);
+    qoi.qoi_to_pixels(quote_qoi, quote_width * quote_height, &quote_pixels);
+    
+    logStr("DEBUG: Decompressed!");
+    
+    for (blue_marble_pixels, 0..) |pixel, i| {
+        blue_marble_pixel_bytes[4 * i + 0] = pixel[0];
+        blue_marble_pixel_bytes[4 * i + 1] = pixel[1];
+        blue_marble_pixel_bytes[4 * i + 2] = pixel[2];
+        blue_marble_pixel_bytes[4 * i + 3] = pixel[3];
+    }
 
-    //logStr("DEBUG: Decompressed!");
-    
-    for (pluto_pixels, 0..) |pixel, i| {
-        pluto_pixel_bytes[4 * i + 0] = pixel[0];
-        pluto_pixel_bytes[4 * i + 1] = pixel[1];
-        pluto_pixel_bytes[4 * i + 2] = pixel[2];
-        pluto_pixel_bytes[4 * i + 3] = pixel[3];
+    for (quote_pixels, 0..) |pixel, i| {
+        quote_pixel_bytes[4 * i + 0] = pixel[0];
+        quote_pixel_bytes[4 * i + 1] = pixel[1];
+        quote_pixel_bytes[4 * i + 2] = pixel[2];
+        quote_pixel_bytes[4 * i + 3] = pixel[3];
     }
 }
 
@@ -390,9 +413,9 @@ fn setup_pluto_array_buffer() void {
     glcontext.call("enableVertexAttribArray", .{1}, void);
     glcontext.call("vertexAttribPointer", .{1, 2, gl_FLOAT, false, 4 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
 
-    // Setup pluto texture.
-    pluto_texture = glcontext.call("createTexture", .{}, zjb.Handle);
-    glcontext.call("bindTexture", .{gl_TEXTURE_2D, pluto_texture}, void);
+    // Setup blue marble texture.
+    blue_marble_texture = glcontext.call("createTexture", .{}, zjb.Handle);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, blue_marble_texture}, void);
 
     // NOTE: The WebGL specification does NOT define CLAMP_TO_BORDER... weird.
     glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_WRAP_S, gl_CLAMP_TO_EDGE}, void);
@@ -401,8 +424,8 @@ fn setup_pluto_array_buffer() void {
     glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_MAG_FILTER, gl_NEAREST}, void);
         
     // Note: The width and height have type "GLsizei"... i.e. a i32.
-    const bm_width  : i32 = @intCast(pluto_width);
-    const bm_height : i32 = @intCast(pluto_height);
+    const bm_width  : i32 = @intCast(blue_marble_width);
+    const bm_height : i32 = @intCast(blue_marble_height);
 
     // !!! VERY IMPORTANT !!!
     // gl.texImage2D accepts a pixel source ONLY with type "Uint8Array". As such,
@@ -411,9 +434,34 @@ fn setup_pluto_array_buffer() void {
     //
     // We spent something like 2 hours debugging this. Worst debugging experience of 2025 so far.
     
-    const pixel_data_obj = zjb.u8ArrayView(&pluto_pixel_bytes);
+    const bm_pixel_data_obj = zjb.u8ArrayView(&blue_marble_pixel_bytes);
     
-    glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, bm_width, bm_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, pixel_data_obj}, void);
+    glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, bm_width, bm_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, bm_pixel_data_obj}, void);
+
+    // Setup quote texture.
+    quote_texture = glcontext.call("createTexture", .{}, zjb.Handle);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, quote_texture}, void);
+
+    // NOTE: The WebGL specification does NOT define CLAMP_TO_BORDER... weird.
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_WRAP_S, gl_CLAMP_TO_EDGE}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_WRAP_T, gl_CLAMP_TO_EDGE}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_MIN_FILTER, gl_NEAREST}, void);
+    glcontext.call("texParameteri", .{gl_TEXTURE_2D, gl_TEXTURE_MAG_FILTER, gl_NEAREST}, void);
+        
+    // Note: The width and height have type "GLsizei"... i.e. a i32.
+    const q_width  : i32 = @intCast(quote_width);
+    const q_height : i32 = @intCast(quote_height);
+
+    // !!! VERY IMPORTANT !!!
+    // gl.texImage2D accepts a pixel source ONLY with type "Uint8Array". As such,
+    // applying a zjb.dataView() to the pixels will result in NO texture being drawn.
+    // Instead, use zjb.u8ArrayView().
+    //
+    // We spent something like 2 hours debugging this. Worst debugging experience of 2025 so far.
+    
+    const q_pixel_data_obj = zjb.u8ArrayView(&quote_pixel_bytes);
+    
+    glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, q_width, q_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, q_pixel_data_obj}, void);
 }
 
 
@@ -453,7 +501,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
 
 
-
     // Render the photo!
     glcontext.call("useProgram", .{pluto_shader_program}, void);
 
@@ -469,7 +516,11 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
     // Make the GPU use the pluto texture.
     glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
-    glcontext.call("bindTexture", .{gl_TEXTURE_2D, pluto_texture}, void);
+
+    const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
+    const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
+    
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
 
     const pluto_texture_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
     glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
