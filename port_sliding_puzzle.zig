@@ -73,7 +73,7 @@ var is_won = false;
 // WebGL
 var glcontext      : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
-var fractal_shader_program : zjb.Handle = undefined;
+var background_shader_program : zjb.Handle = undefined;
 
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
@@ -105,9 +105,10 @@ export fn main() void {
 
     init_webgl_context();
 
-    compile_shaders();
+    //compile_background_shader();
+    //setup_background_array_buffer();
 
-    setup_array_buffers();
+    // TODO... Pluto example
     
     logStr("Debug: Begin main loop.");
     
@@ -131,7 +132,7 @@ fn init_webgl_context() void {
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 }
 
-fn compile_shaders() void {
+fn compile_background_shader() void {
     // Try compiling the vertex and fragment shaders.
     const vertex_background_source_handle   = zjb.constString(vertex_background_source);
     const fragment_background_source_handle = zjb.constString(fragment_background_source);
@@ -162,20 +163,20 @@ fn compile_shaders() void {
     }
     
     // Try and link the vertex and fragment shaders.
-    fractal_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{fractal_shader_program, vertex_background},   void);
-    glcontext.call("attachShader", .{fractal_shader_program, fragment_background}, void);
+    background_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{background_shader_program, vertex_background},   void);
+    glcontext.call("attachShader", .{background_shader_program, fragment_background}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
 
-    glcontext.call("bindAttribLocation", .{fractal_shader_program, 0, zjb.constString("aPos")}, void);
+    glcontext.call("bindAttribLocation", .{background_shader_program, 0, zjb.constString("aPos")}, void);
 
-    glcontext.call("linkProgram",  .{fractal_shader_program}, void);
+    glcontext.call("linkProgram",  .{background_shader_program}, void);
 
     // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{fractal_shader_program, gl_LINK_STATUS}, bool);
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{background_shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
         logStr("Debug: Shader linked successfully!");
@@ -184,7 +185,7 @@ fn compile_shaders() void {
     }
 }
 
-fn setup_array_buffers() void {
+fn setup_background_array_buffer() void {
     // Define an rectangle to draw the fractal shader on.
     const triangle_gpu_data : [6 * 2] f32 = .{
         // xpos, ypos
@@ -221,34 +222,37 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
+    _ = time_seconds;
     
     // Render the background color.
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
-    // Render the rainbow triangle.
-    glcontext.call("useProgram", .{fractal_shader_program}, void);
+    // // Render the background.
+    // glcontext.call("useProgram", .{background_shader_program}, void);
 
-    // Calculate background_shader uniforms.
-    const program_secs : f32 = @floatCast(time_seconds);    
-    const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
+    // // Calculate background_shader uniforms.
+    // const program_secs : f32 = @floatCast(time_seconds);    
+    // const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
 
-    //@port, @temp
-    animation_won_fraction = 0;
+    // //@port, @temp
+    // animation_won_fraction = 0;
     
-    const radius_value : f32 = 0.018571486 * switch(is_won) {
-        false => 1,
-        true  => 1 - animation_won_fraction,
-    };
+    // const radius_value : f32 = 0.018571486 * switch(is_won) {
+    //     false => 1,
+    //     true  => 1 - animation_won_fraction,
+    // };
 
-    const lp_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("lp")}, zjb.Handle);
-    const radius_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("radius")}, zjb.Handle);
+    // const lp_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("lp")}, zjb.Handle);
+    // const radius_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("radius")}, zjb.Handle);
     
-    glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
-    glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
+    // glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
+    // glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
     
-    // The Actual Drawing command!
-    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
+    // // The Actual Drawing command!
+    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
+
+    
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
