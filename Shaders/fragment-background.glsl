@@ -8,10 +8,8 @@ uniform float time;
 
 const float PI = 3.1415926535897932384626433832795;
 
-// @port
-// REPLACE THESE WITH UNIFORMS
-const float lp = 2.0;
-const float radius = 0.08095238; // Should be around 0.08095238.
+uniform float lp;
+uniform float radius; // Should be around 0.08095238.
 
 //const int reps = 10;
 const int reps = 2;

@@ -49,10 +49,9 @@ const fragment_shader_source = @embedFile("./Shaders/fragment-background.glsl");
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
 
-// Globals
-var glcontext      : zjb.Handle = undefined;
-var triangle_vbo   : zjb.Handle = undefined;
-var fractal_shader_program : zjb.Handle = undefined;
+// Constants
+const PI : f32 = std.math.pi;
+const BACKGROUND_SHADER_SHAPE_CHANGE_TIME = 200;
 
 // WebGL constants obtained from the WebGL specification at:
 // https://registry.khronos.org/webgl/specs/1.0.0/
@@ -66,6 +65,27 @@ const gl_VERTEX_SHADER    : i32 = 0x8B31;
 const gl_FRAGMENT_SHADER  : i32 = 0x8B30;
 const gl_COMPILE_STATUS   : i32 = 0x8B81;
 const gl_LINK_STATUS      : i32 = 0x8B82;
+
+// Globals
+// Game logic.
+var is_won = false;
+
+// WebGL
+var glcontext      : zjb.Handle = undefined;
+var triangle_vbo   : zjb.Handle = undefined;
+var fractal_shader_program : zjb.Handle = undefined;
+
+// Animation
+const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
+const ANIMATION_WON_TIME          : f32 = 3;
+const ANIMATION_QUOTE_TIME        : f32 = 3;
+
+var animating_tile : u8 = 0;
+//var animation_direction : GridMovementDirection = undefined;
+
+var animation_tile_fraction  : f32 = 0;
+var animation_won_fraction   : f32 = 0;
+var animation_quote_fraction : f32 = 0;
 
 // Timestamp
 var initial_timestamp      : f64 = undefined;
@@ -209,10 +229,23 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // Render the rainbow triangle.
     glcontext.call("useProgram", .{fractal_shader_program}, void);
 
-    // Set the time uniform in the fragment shader.
-    const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const time_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("time")}, zjb.Handle);
-    glcontext.call("uniform1f", .{time_uniform_location, time_seconds_f32}, void);
+    // Calculate background_shader uniforms.
+    const program_secs : f32 = @floatCast(time_seconds);    
+    const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
+
+    //@port, @temp
+    animation_won_fraction = 0;
+    
+    const radius_value : f32 = 0.018571486 * switch(is_won) {
+        false => 1,
+        true  => 1 - animation_won_fraction,
+    };
+
+    const lp_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("lp")}, zjb.Handle);
+    const radius_uniform_location = glcontext.call("getUniformLocation", .{fractal_shader_program, zjb.constString("radius")}, zjb.Handle);
+    
+    glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
+    glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
     
     // The Actual Drawing command!
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
