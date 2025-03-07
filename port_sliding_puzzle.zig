@@ -127,7 +127,9 @@ fn logStr(str: []const u8) void {
 
 // The photo of Pluto below was taken by the New Horizons spacecraft,
 // see the header of this file for more information.
-const pluto_qoi = @embedFile("./Assets/pluto_new_horizons.qoi");
+//const pluto_qoi = @embedFile("./Assets/blue_marble.qoi");
+//const pluto_qoi = @embedFile("./Assets/pluto_new_horizons.qoi");
+const pluto_qoi = @embedFile("./Assets/blue_marble_480.qoi");
 const pluto_header = qoi.comptime_header_parser(pluto_qoi);
 const pluto_width  = pluto_header.image_width;
 const pluto_height = pluto_header.image_height;
@@ -150,7 +152,12 @@ var pluto_pixel_bytes : [4 * pluto_width * pluto_height] u8 = undefined;
 
 
 export fn main() void {
+
+    logStr("DEBUG: Program start!"); //@debug
+    
     init_clock();
+
+    logStr("DEBUG: Clock init!"); //@debug
 
     decompress_pluto();
     
@@ -176,8 +183,12 @@ fn init_clock() void {
 }
 
 fn decompress_pluto() void {
+    //    logStr("DEBUG: Attempting decompression...");
+    
     qoi.qoi_to_pixels(pluto_qoi, pluto_width * pluto_height, &pluto_pixels);
 
+    //logStr("DEBUG: Decompressed!");
+    
     for (pluto_pixels, 0..) |pixel, i| {
         pluto_pixel_bytes[4 * i + 0] = pixel[0];
         pluto_pixel_bytes[4 * i + 1] = pixel[1];
