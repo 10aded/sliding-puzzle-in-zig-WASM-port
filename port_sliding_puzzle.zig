@@ -103,10 +103,11 @@ var is_won = false;
 
 // WebGL
 var glcontext      : zjb.Handle = undefined;
+var background_vbo : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
 var background_shader_program : zjb.Handle = undefined;
 
-var pluto_shader_program : zjb.Handle = undefined;
+var color_texture_shader_program : zjb.Handle = undefined;
 
 var blue_marble_texture  : zjb.Handle = undefined;
 var quote_texture  : zjb.Handle = undefined;
@@ -177,11 +178,10 @@ export fn main() void {
     init_webgl_context();
 
     compile_shaders();
-    
-    //compile_background_shader();
-    //setup_background_array_buffer();
+      
+    setup_background_array_buffer();
 
-    compile_pluto_shader();
+    //compile_pluto_shader();
 
     setup_pluto_array_buffer();
     
@@ -235,13 +235,15 @@ fn init_webgl_context() void {
 }
 
 fn compile_shaders() void {
-    const background_shader_attributes : [1][:0] const u8 = .{ "aPos"};
-    
+    const background_shader_attributes : [1] [:0] const u8 = .{ "aPos"};
+    const color_texture_shader_attributes : [4] [:0] const u8 = .{"aPos", "aColor", "aTexCoord", "aLambda"};
     background_shader_program = compile_shader(vertex_background_source,
                                                fragment_background_source,
                                                background_shader_attributes[0..]);
-    
-    //colo_texture_shader_program = compile_shader( ??? ); 
+
+    color_texture_shader_program = compile_shader( vertex_color_texture_source,
+                                                  fragment_color_texture_source,
+                                                  color_texture_shader_attributes[0..]);
 }
 
 fn compile_shader( comptime vertex_shader_source : [:0] const u8, comptime fragment_shader_source : [:0] const u8, attribute_list : [] const [:0] const u8) zjb.Handle {
@@ -286,8 +288,8 @@ fn compile_shader( comptime vertex_shader_source : [:0] const u8, comptime fragm
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
-    for (attribute_list) |attrib| {
-        glcontext.call("bindAttribLocation", .{shader_program, 0, zjb.string(attrib)}, void);
+    for (attribute_list, 0..) |attrib, i| {
+        glcontext.call("bindAttribLocation", .{shader_program, @as(i32, @intCast(i)), zjb.string(attrib)}, void);
     }
 
     glcontext.call("linkProgram",  .{shader_program}, void);
@@ -338,23 +340,23 @@ fn compile_pluto_shader() void {
     }
     
     // Try and link the vertex and fragment shaders.
-    pluto_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{pluto_shader_program, vertex_shader},   void);
-    glcontext.call("attachShader", .{pluto_shader_program, fragment_shader}, void);
+    color_texture_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{color_texture_shader_program, vertex_shader},   void);
+    glcontext.call("attachShader", .{color_texture_shader_program, fragment_shader}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
 
-    glcontext.call("bindAttribLocation", .{pluto_shader_program, 0, zjb.constString("aPos")}, void);
-    glcontext.call("bindAttribLocation", .{pluto_shader_program, 1, zjb.constString("aColor")}, void);
-    glcontext.call("bindAttribLocation", .{pluto_shader_program, 2, zjb.constString("aTexCoord")}, void);
-    glcontext.call("bindAttribLocation", .{pluto_shader_program, 3, zjb.constString("aLambda")}, void);
+    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 0, zjb.constString("aPos")}, void);
+    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 1, zjb.constString("aColor")}, void);
+    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 2, zjb.constString("aTexCoord")}, void);
+    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 3, zjb.constString("aLambda")}, void);
     
-    glcontext.call("linkProgram",  .{pluto_shader_program}, void);
+    glcontext.call("linkProgram",  .{color_texture_shader_program}, void);
 
     // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{pluto_shader_program, gl_LINK_STATUS}, bool);
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{color_texture_shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
         logStr("Debug: Shader linked successfully!");
@@ -379,9 +381,9 @@ fn setup_background_array_buffer() void {
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
     
     // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
-    triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
+    background_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
 
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
@@ -493,6 +495,9 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
     // Render the background.
+    //    gl.bindVertexArray(background_vao);
+    //    gl.bindBuffer(gl.ARRAY_BUFFER, background_vbo);
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
     glcontext.call("useProgram", .{background_shader_program}, void);
 
     // Calculate background_shader uniforms.
@@ -520,31 +525,32 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
 
     // // Render the photo!
-    // glcontext.call("useProgram", .{pluto_shader_program}, void);
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    glcontext.call("useProgram", .{color_texture_shader_program}, void);
 
-    // // Let the lambda uniform, which adjusts how gray the image is.    
-    // const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    // const speed = 4;
-    // const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
-    // const lambda = osc * osc;
+    // Let the lambda uniform, which adjusts how gray the image is.    
+    const time_seconds_f32 : f32 = @floatCast(time_seconds);
+    const speed = 4;
+    const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
+    const lambda = osc * osc;
 
-    // const lambda_uniform_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("lambda")}, zjb.Handle);
+    const lambda_uniform_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("lambda")}, zjb.Handle);
 
-    // glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
+    glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
 
-    // // Make the GPU use the pluto texture.
-    // glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
+    // Make the GPU use the pluto texture.
+    glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
 
-    // const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
-    // const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
+    const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
+    const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
     
-    // glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
 
-    // const pluto_texture_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
-    // glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
+    const pluto_texture_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
+    glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
     
-    // // Draw the dwarf planet!
-    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
+    // Draw the dwarf planet!
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }

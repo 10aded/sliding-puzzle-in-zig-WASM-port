@@ -34,7 +34,7 @@ const vec4 DISK_COLOR = WHITE;
 void main(void)
 {
     // JUST USING MAGIC (NUMBER) COORDS FOR THE MOMENT...
-    vec2 normalized_coords = gl_FragCoord.xy / 1000.0;
+    vec2 normalized_coords = gl_FragCoord.xy / 500.0;
     vec2 unit_coord = 2.0 * normalized_coords - 1.0;
     
     vec2 scaled = float(reps) * unit_coord;
