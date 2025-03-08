@@ -346,6 +346,8 @@ fn create_bind_textures() void {
     const q_pixel_data_obj = zjb.u8ArrayView(&quote_pixel_bytes);
     
     glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, q_width, q_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, q_pixel_data_obj}, void);
+
+    glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
 }
 
 fn setup_background_VBO() void {
@@ -418,10 +420,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     setup_background_VBO();
     glcontext.call("useProgram", .{background_shader_program}, void);
 
-    //gl.bindVertexArray(global_vao);
-    //    gl.bindBuffer(gl.ARRAY_BUFFER, background_vbo);
-    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
-
     // Calculate background_shader uniforms.
     const program_secs : f32 = @floatCast(time_seconds);    
     const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
@@ -444,30 +442,12 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
 
-
-    
-
-
-    // Render the photo!
-    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
-    //glcontext.call("useProgram", .{color_texture_shader_program}, void);
-
+    // Render the tiles.
     setup_color_vertex_VBO();
     glcontext.call("useProgram", .{color_texture_shader_program}, void);
-    
-    // Let the lambda uniform, which adjusts how gray the image is.    
+
+    // Alternate the texture.
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const speed = 4;
-    const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
-    const lambda = osc * osc;
-
-    const lambda_uniform_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("lambda")}, zjb.Handle);
-
-    glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
-
-    // Make the GPU use the pluto texture.
-    glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
-
     const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
     const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
     
