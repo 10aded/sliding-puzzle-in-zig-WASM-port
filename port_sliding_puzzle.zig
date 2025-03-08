@@ -48,6 +48,8 @@
 // on the Twitch channel 10aded; copies of the stream are
 // on YouTube at the @10aded channel.
 
+var temp = true;
+
 const std = @import("std");
 const zjb = @import("zjb");
 const qoi = @import("./Dependencies/qoi.zig");
@@ -61,19 +63,31 @@ const fragment_color_texture_source = @embedFile("./Shaders/fragment-color-textu
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
 
+// Colors
+const WHITE       = Color{255,   255,  255, 255};
+const MAGENTA     = Color{255,     0,  255, 255};
+const GRID_BLUE   = Color{0x3e, 0x48, 0x5f, 255};
+const SPACE_BLACK = Color{0x03, 0x03, 0x05, 255};
+
+const DEBUG_COLOR       = MAGENTA;
+const GRID_BACKGROUND   = WHITE;
+const TILE_BORDER       = GRID_BLUE;
+
 // Constants
 const PI : f32 = std.math.pi;
 const BACKGROUND_SHADER_SHAPE_CHANGE_TIME = 200;
 
 // Type aliases.
+const Vec2  = @Vector(2, f32);
+const Vec4  = @Vector(4, f32);
 const Color = @Vector(4, u8);
-
 
 // WebGL constants obtained from the WebGL specification at:
 // https://registry.khronos.org/webgl/specs/1.0.0/
 const gl_FLOAT            : i32 = 0x1406; 
 const gl_ARRAY_BUFFER     : i32 = 0x8892;
 const gl_STATIC_DRAW      : i32 = 0x88E4;
+const gl_DYNAMIC_DRAW     : i32 = 0x88E8;
 const gl_COLOR_BUFFER_BIT : i32 = 0x4000;
 const gl_TRIANGLES        : i32 = 0x0004;
 
@@ -144,7 +158,7 @@ const blue_marble_width  = blue_marble_header.image_width;
 const blue_marble_height = blue_marble_header.image_height;
 var blue_marble_pixel_bytes : [4 * blue_marble_width * blue_marble_height] u8 = undefined;
 
-const quote_qoi = @embedFile("./Assets/quote.qoi");
+const quote_qoi = @embedFile("./Assets/blue.qoi");
 const quote_header = qoi.comptime_header_parser(quote_qoi);
 const quote_width  = quote_header.image_width;
 const quote_height = quote_header.image_height;
@@ -164,6 +178,38 @@ var quote_pixel_bytes : [4 * quote_width * quote_height] u8 = undefined;
 // [] u8 ... if this is even sensible to begin with... we get a
 // TODO: implement @ptrCast between slices changing the length compile error.
 
+// Geometry
+const ColorTextureVertex = extern struct {
+    x  : f32,
+    y  : f32,
+    r  : f32,
+    g  : f32,
+    b  : f32,
+    tx : f32,
+    ty : f32,
+    l  : f32, 
+};
+
+fn colorTextureVertex( x : f32, y : f32, r : f32, g : f32, b :f32, tx : f32, ty : f32, l : f32) ColorTextureVertex {
+    return ColorTextureVertex{.x = x, .y = y, .r = r, .g = g, .b = b, .tx = tx, .ty = ty, .l = l};
+}
+
+// Note: The size of the vertex_buffer assumes the game will
+// not have a grid larger than 6 x 6.
+var vertex_buffer : [500] ColorTextureVertex = undefined;
+var vertex_buffer_index : usize = 0;
+
+const Rectangle = struct {
+    center : Vec2,
+    width  : f32,
+    height : f32,
+};
+
+fn rectangle(pos : Vec2, width : f32, height : f32) Rectangle {
+    return Rectangle{.center = pos, .width = width, .height = height};
+}
+
+
 export fn main() void {
 
     logStr("DEBUG: Program start!"); //@debug
@@ -182,6 +228,55 @@ export fn main() void {
     
     animationFrame(initial_timestamp);
 }
+
+// Figure out and store the GPU data that will draw a rectangle
+// interpolating a single specified color and a portion of a texture.
+fn draw_color_texture_rectangle( rect : Rectangle , color : Color, top_left_texture_coord : Vec2, bottom_right_texture_coord : Vec2, lambda : f32 ) void {
+
+    const tltc = top_left_texture_coord;
+    const brtc = bottom_right_texture_coord;
+
+    // Compute the rectangle corner coordinates.
+    const xleft   = rect.center[0] - 0.5 * rect.width;
+    const xright  = rect.center[0] + 0.5 * rect.width;
+    const ytop    = rect.center[1] - 0.5 * rect.height;
+    const ybottom = rect.center[1] + 0.5 * rect.height;
+
+    const color_f32 : Vec4 = @floatFromInt(color);
+    const splat255  : Vec4 = @splat(255);
+    const color_norm = color_f32 / splat255;
+    const r = color_norm[0];
+    const g = color_norm[1];
+    const b = color_norm[2];
+
+    // Compute the coordinates of the texture.
+    const sleft   = tltc[0];
+    const sright  = brtc[0];
+    const ttop    = tltc[1];
+    const tbottom = brtc[1];
+    
+    // Compute nodes we will push to the GPU.
+    const v0 = colorTextureVertex(xleft,  ytop,    r, g, b, sleft,  ttop,    lambda);
+    const v1 = colorTextureVertex(xright, ytop,    r, g, b, sright, ttop,    lambda);
+    const v2 = colorTextureVertex(xleft,  ybottom, r, g, b, sleft,  tbottom, lambda);
+    const v3 = v1;
+    const v4 = v2;
+    const v5 = colorTextureVertex(xright, ybottom, r, g, b, sright, tbottom, lambda);
+
+    // Set the vertex buffer with the data.
+    const buffer = &vertex_buffer;
+    const i      = vertex_buffer_index;
+
+    buffer[i + 0] = v0;
+    buffer[i + 1] = v1;
+    buffer[i + 2] = v2;
+    buffer[i + 3] = v3;
+    buffer[i + 4] = v4;
+    buffer[i + 5] = v5;
+    
+    vertex_buffer_index += 6;
+}
+
 
 fn init_clock() void {
     const timeline = zjb.global("document").get("timeline", zjb.Handle);
@@ -363,7 +458,7 @@ fn setup_background_VBO() void {
     };
 
     const gpu_data_obj = zjb.dataView(&background_triangle_gpu_data);
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(background_triangle_gpu_data))}, void);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW}, void); //, 0, @sizeOf(@TypeOf(background_triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
     // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
@@ -379,19 +474,20 @@ fn setup_background_VBO() void {
 }
 
 fn setup_color_vertex_VBO() void {
-    // Define an equilateral RGB triangle.
-        const triangle_gpu_data : [6 * 8] f32 = .{
-            // x, y, r, g, b, tx, ty, l,
-             1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
-            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-            -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
-    };
+    // // Define an equilateral RGB triangle.
+    //     const triangle_gpu_data : [6 * 8] f32 = .{
+    //         // x, y, r, g, b, tx, ty, l,
+    //          1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
+    //         -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+    //          1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+    //         -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+    //          1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+    //         -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
+    // };
     
-    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
+    //    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, 4000 * @sizeOf(f32), gl_DYNAMIC_DRAW}, void); //, 0, @sizeOf(@TypeOf(background_triangle_gpu_data))}, void);
+//    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
     // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders.
@@ -416,7 +512,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
-    // Render the background.
+    // Render the background pattern.
     setup_background_VBO();
     glcontext.call("useProgram", .{background_shader_program}, void);
 
@@ -425,7 +521,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
 
     //@port, @temp
-    animation_won_fraction = 0;
+    animation_won_fraction = 1;
     
     const radius_value : f32 = 0.018571486 * switch(is_won) {
         false => 1,
@@ -438,26 +534,76 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
     glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
     
-    // The Actual Drawing command!
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
-
+    // TODO...    
     // Render the tiles.
     setup_color_vertex_VBO();
     glcontext.call("useProgram", .{color_texture_shader_program}, void);
 
-    // Alternate the texture.
-    const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
-    const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
+    // // Alternate the texture.
+    // const time_seconds_f32 : f32 = @floatCast(time_seconds);
+    // const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
+    // const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
     
-    glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
+    // glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
 
-    const pluto_texture_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
-    glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
+    // const pluto_texture_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
+    // glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
     
-    // Draw the dwarf planet!
-    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
+    // // Draw the dwarf planet!
+    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
+
+    // Reset the vertex_buffer.
+    vertex_buffer_index = 0;
+    
+    // Make the quote texture active.
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, quote_texture}, void);
+
+    // Note: The game window is assumed to have dimensions 500 x 500;
+    // which informed the values below.
+    const quote_width_f32  : f32 = @floatFromInt(quote_width);
+    const quote_height_f32 : f32 = @floatFromInt(quote_height);
+    const quote_pos : Vec2 = .{550, 825};
+    const quote_rectangle = rectangle(quote_pos, quote_width_f32, quote_height_f32);
+
+    animation_quote_fraction = 1;
+    draw_color_texture_rectangle(quote_rectangle, SPACE_BLACK, .{0,0}, .{1, 1}, animation_quote_fraction);
+
+    // Convert the bufferdata into a [] f32
+    var vertex_buffer_f32 : [8 * 500] f32 = undefined;
+
+    for (0..vertex_buffer_index) |i| {
+        vertex_buffer_f32[8 * i + 0] = vertex_buffer[i].x;
+        vertex_buffer_f32[8 * i + 1] = vertex_buffer[i].y;
+        vertex_buffer_f32[8 * i + 2] = vertex_buffer[i].r;
+        vertex_buffer_f32[8 * i + 3] = vertex_buffer[i].g;
+        vertex_buffer_f32[8 * i + 4] = vertex_buffer[i].b;
+        vertex_buffer_f32[8 * i + 5] = vertex_buffer[i].tx;
+        vertex_buffer_f32[8 * i + 6] = vertex_buffer[i].ty;
+        vertex_buffer_f32[8 * i + 7] = vertex_buffer[i].l;
+    }
+
+    const quote_gpu_data = vertex_buffer_f32[0..8 * vertex_buffer_index];
+    
+    const quote_gpu_data_obj = zjb.dataView(quote_gpu_data);
+
+    if (temp) {
+        for (quote_gpu_data) |float| {
+            log(float);
+        }
+        temp = false;
+    }
+    
+    // Draw the quote.
+    glcontext.call("bufferSubData", .{gl_ARRAY_BUFFER, 0, quote_gpu_data_obj}, void);
+    // gl.bufferSubData(gl.ARRAY_BUFFER,
+    //                  0,
+    //                  @as(c_int, @intCast(vertex_buffer_index)) * 8 * @sizeOf(f32),
+    //                  &vertex_buffer[0]);
+
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, @as(i32, @intCast(vertex_buffer_index))}, void);
+    
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
