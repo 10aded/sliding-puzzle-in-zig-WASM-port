@@ -103,6 +103,10 @@ var is_won = false;
 
 // WebGL
 var glcontext      : zjb.Handle = undefined;
+
+var global_vbo : zjb.Handle = undefined;
+
+// TODO... delete if needed
 var background_vbo : zjb.Handle = undefined;
 var triangle_vbo   : zjb.Handle = undefined;
 var background_shader_program : zjb.Handle = undefined;
@@ -173,17 +177,15 @@ export fn main() void {
     
     init_clock();
 
-    decompress_pluto();
+    decompress_images();
     
     init_webgl_context();
 
     compile_shaders();
       
-    setup_background_array_buffer();
+    //setup_background_array_buffer();
 
-    //compile_pluto_shader();
-
-    setup_pluto_array_buffer();
+    //setup_pluto_array_buffer();
     
     logStr("Debug: Begin main loop.");
     
@@ -197,7 +199,7 @@ fn init_clock() void {
     initial_timestamp = timeline.get("currentTime", f64);
 }
 
-fn decompress_pluto() void {
+fn decompress_images() void {
     logStr("DEBUG: Attempting decompression...");
 
     var blue_marble_pixels : [blue_marble_width * blue_marble_height] Color = undefined;
@@ -232,6 +234,14 @@ fn init_webgl_context() void {
     canvas.set("height", CANVAS_HEIGHT);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
+
+    // Create a WebGLBuffer.
+    // Since there is not VAO in WebGL,
+    // basically state saved so just make one VBO to get reused everywhere.
+    // ???
+
+    global_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
+    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
 }
 
 fn compile_shaders() void {
@@ -305,68 +315,7 @@ fn compile_shader( comptime vertex_shader_source : [:0] const u8, comptime fragm
     return shader_program;
 }
 
-fn compile_pluto_shader() void {
-    // Try compiling the vertex and fragment shaders.
-    const vertex_color_texture_source_handle   = zjb.constString(vertex_color_texture_source);
-    const fragment_color_texture_source_handle = zjb.constString(fragment_color_texture_source);
-
-    const vertex_shader   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
-    const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
-
-    glcontext.call("shaderSource", .{vertex_shader, vertex_color_texture_source_handle}, void);
-    glcontext.call("shaderSource", .{fragment_shader, fragment_color_texture_source_handle}, void);
-    
-    glcontext.call("compileShader", .{vertex_shader},   void);
-    glcontext.call("compileShader", .{fragment_shader}, void);
-
-    // Check to see that the vertex and fragment shaders compiled.
-    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
-    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
-
-    if (! vs_comp_ok) {
-        logStr("ERROR: vertex shader failed to compile!");
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
-        log(info_log);
-    } else {
-        logStr("Debug: vertex shader successfully compiled!");        
-    }
-    
-    if (! fs_comp_ok) {
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
-        log(info_log);
-        logStr("ERROR: fragment shader failed to compile!");
-    } else {
-        logStr("Debug: fragment shader successfully compiled!");        
-    }
-    
-    // Try and link the vertex and fragment shaders.
-    color_texture_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{color_texture_shader_program, vertex_shader},   void);
-    glcontext.call("attachShader", .{color_texture_shader_program, fragment_shader}, void);
-
-    // NOTE: Before we link the program, we need to manually choose the locations
-    // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
-    // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
-
-    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 0, zjb.constString("aPos")}, void);
-    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 1, zjb.constString("aColor")}, void);
-    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 2, zjb.constString("aTexCoord")}, void);
-    glcontext.call("bindAttribLocation", .{color_texture_shader_program, 3, zjb.constString("aLambda")}, void);
-    
-    glcontext.call("linkProgram",  .{color_texture_shader_program}, void);
-
-    // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{color_texture_shader_program, gl_LINK_STATUS}, bool);
-
-    if (shader_linked_ok) {
-        logStr("Debug: Shader linked successfully!");
-    } else {
-        logStr("ERROR: Shader failed to link!");
-    }
-}
-
-
-fn setup_background_array_buffer() void {
+fn setup_background_VBO() void {
     // Define an rectangle to draw the fractal shader on.
     const triangle_gpu_data : [6 * 2] f32 = .{
         // xpos, ypos
@@ -381,9 +330,9 @@ fn setup_background_array_buffer() void {
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
     
     // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
-    background_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
+//    background_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
 
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
+    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
@@ -399,8 +348,7 @@ fn setup_background_array_buffer() void {
         }, void);
 }
 
-
-fn setup_pluto_array_buffer() void {
+fn setup_color_vertex_VBO() void {
     // Define an equilateral RGB triangle.
         const triangle_gpu_data : [6 * 8] f32 = .{
             // x, y, r, g, b, tx, ty, l,
@@ -415,9 +363,9 @@ fn setup_pluto_array_buffer() void {
     const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
     
     // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
-    triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
+    //triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
 
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
     glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
 
     // Set the VBO attributes.
@@ -495,10 +443,12 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
     // Render the background.
-    //    gl.bindVertexArray(background_vao);
-    //    gl.bindBuffer(gl.ARRAY_BUFFER, background_vbo);
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
+    setup_background_VBO();
     glcontext.call("useProgram", .{background_shader_program}, void);
+
+    //gl.bindVertexArray(global_vao);
+    //    gl.bindBuffer(gl.ARRAY_BUFFER, background_vbo);
+    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, background_vbo}, void);
 
     // Calculate background_shader uniforms.
     const program_secs : f32 = @floatCast(time_seconds);    
@@ -523,11 +473,16 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
 
 
+    
 
-    // // Render the photo!
-    glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+
+    // Render the photo!
+    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
+    //glcontext.call("useProgram", .{color_texture_shader_program}, void);
+
+    setup_color_vertex_VBO();
     glcontext.call("useProgram", .{color_texture_shader_program}, void);
-
+    
     // Let the lambda uniform, which adjusts how gray the image is.    
     const time_seconds_f32 : f32 = @floatCast(time_seconds);
     const speed = 4;
