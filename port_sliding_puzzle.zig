@@ -138,18 +138,16 @@ fn logStr(str: []const u8) void {
 
 // The photo of Pluto below was taken by the New Horizons spacecraft,
 // see the header of this file for more information.
-const blue_marble_qoi = @embedFile("./Assets/blue_marble_240.qoi");
+const blue_marble_qoi = @embedFile("./Assets/blue_marble_480.qoi");
 const blue_marble_header = qoi.comptime_header_parser(blue_marble_qoi);
 const blue_marble_width  = blue_marble_header.image_width;
 const blue_marble_height = blue_marble_header.image_height;
-var blue_marble_pixels : [blue_marble_width * blue_marble_height] Color = undefined;
 var blue_marble_pixel_bytes : [4 * blue_marble_width * blue_marble_height] u8 = undefined;
 
 const quote_qoi = @embedFile("./Assets/quote.qoi");
 const quote_header = qoi.comptime_header_parser(quote_qoi);
 const quote_width  = quote_header.image_width;
 const quote_height = quote_header.image_height;
-var quote_pixels : [quote_width * quote_height] Color = undefined;
 var quote_pixel_bytes : [4 * quote_width * quote_height] u8 = undefined;
 
 // TODO: In order to call gl.texImage2D to make a texture,
@@ -178,6 +176,8 @@ export fn main() void {
     
     init_webgl_context();
 
+    compile_shaders();
+    
     //compile_background_shader();
     //setup_background_array_buffer();
 
@@ -199,11 +199,12 @@ fn init_clock() void {
 
 fn decompress_pluto() void {
     logStr("DEBUG: Attempting decompression...");
+
+    var blue_marble_pixels : [blue_marble_width * blue_marble_height] Color = undefined;
+    var quote_pixels : [quote_width * quote_height] Color = undefined;
     
     qoi.qoi_to_pixels(blue_marble_qoi, blue_marble_width * blue_marble_height, &blue_marble_pixels);
     qoi.qoi_to_pixels(quote_qoi, quote_width * quote_height, &quote_pixels);
-    
-    logStr("DEBUG: Decompressed!");
     
     for (blue_marble_pixels, 0..) |pixel, i| {
         blue_marble_pixel_bytes[4 * i + 0] = pixel[0];
@@ -218,6 +219,8 @@ fn decompress_pluto() void {
         quote_pixel_bytes[4 * i + 2] = pixel[2];
         quote_pixel_bytes[4 * i + 3] = pixel[3];
     }
+
+    logStr("DEBUG: Decompressed!");
 }
 
 
@@ -231,57 +234,73 @@ fn init_webgl_context() void {
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 }
 
-fn compile_background_shader() void {
-    // Try compiling the vertex and fragment shaders.
-    const vertex_background_source_handle   = zjb.constString(vertex_background_source);
-    const fragment_background_source_handle = zjb.constString(fragment_background_source);
-
-    const vertex_background   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
-    const fragment_background = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
-
-    glcontext.call("shaderSource", .{vertex_background, vertex_background_source_handle}, void);
-    glcontext.call("shaderSource", .{fragment_background, fragment_background_source_handle}, void);
+fn compile_shaders() void {
+    const background_shader_attributes : [1][:0] const u8 = .{ "aPos"};
     
-    glcontext.call("compileShader", .{vertex_background},   void);
-    glcontext.call("compileShader", .{fragment_background}, void);
+    background_shader_program = compile_shader(vertex_background_source,
+                                               fragment_background_source,
+                                               background_shader_attributes[0..]);
+    
+    //colo_texture_shader_program = compile_shader( ??? ); 
+}
+
+fn compile_shader( comptime vertex_shader_source : [:0] const u8, comptime fragment_shader_source : [:0] const u8, attribute_list : [] const [:0] const u8) zjb.Handle {
+        // Try compiling the vertex and fragment shaders.
+    const vertex_shader_source_handle   = zjb.constString(vertex_shader_source);
+    const fragment_shader_source_handle = zjb.constString(fragment_shader_source);
+
+    const vertex_shader   = glcontext.call("createShader", .{gl_VERTEX_SHADER},   zjb.Handle);
+    const fragment_shader = glcontext.call("createShader", .{gl_FRAGMENT_SHADER}, zjb.Handle);
+
+    glcontext.call("shaderSource", .{vertex_shader, vertex_shader_source_handle}, void);
+    glcontext.call("shaderSource", .{fragment_shader, fragment_shader_source_handle}, void);
+    
+    glcontext.call("compileShader", .{vertex_shader},   void);
+    glcontext.call("compileShader", .{fragment_shader}, void);
 
     // Check to see that the vertex and fragment shaders compiled.
-    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_background,   gl_COMPILE_STATUS}, bool);
-    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_background, gl_COMPILE_STATUS}, bool);
+    const vs_comp_ok = glcontext.call("getShaderParameter", .{vertex_shader,   gl_COMPILE_STATUS}, bool);
+    const fs_comp_ok = glcontext.call("getShaderParameter", .{fragment_shader, gl_COMPILE_STATUS}, bool);
 
     if (! vs_comp_ok) {
         logStr("ERROR: vertex shader failed to compile!");
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_background}, zjb.Handle);
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{vertex_shader}, zjb.Handle);
         log(info_log);
+    } else {
+        logStr("DEBUG: vertex shader compiled!");
     }
     
     if (! fs_comp_ok) {
-        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_background}, zjb.Handle);
+        const info_log : zjb.Handle = glcontext.call("getShaderInfoLog", .{fragment_shader}, zjb.Handle);
         log(info_log);
         logStr("ERROR: fragment shader failed to compile!");
+    } else {
+        logStr("DEBUG: fragment shader compiled!");
     }
     
     // Try and link the vertex and fragment shaders.
-    background_shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
-    glcontext.call("attachShader", .{background_shader_program, vertex_background},   void);
-    glcontext.call("attachShader", .{background_shader_program, fragment_background}, void);
+    const shader_program = glcontext.call("createProgram", .{}, zjb.Handle);
+    glcontext.call("attachShader", .{shader_program, vertex_shader},   void);
+    glcontext.call("attachShader", .{shader_program, fragment_shader}, void);
 
     // NOTE: Before we link the program, we need to manually choose the locations
     // for the vertex attributes, otherwise the linker chooses for us. See, e.g:
     // https://webglfundamentals.org/webgl/lessons/webgl-attributes.html
+    for (attribute_list) |attrib| {
+        glcontext.call("bindAttribLocation", .{shader_program, 0, zjb.string(attrib)}, void);
+    }
 
-    glcontext.call("bindAttribLocation", .{background_shader_program, 0, zjb.constString("aPos")}, void);
-
-    glcontext.call("linkProgram",  .{background_shader_program}, void);
+    glcontext.call("linkProgram",  .{shader_program}, void);
 
     // Check that the shaders linked.
-    const shader_linked_ok = glcontext.call("getProgramParameter", .{background_shader_program, gl_LINK_STATUS}, bool);
+    const shader_linked_ok = glcontext.call("getProgramParameter", .{shader_program, gl_LINK_STATUS}, bool);
 
     if (shader_linked_ok) {
         logStr("Debug: Shader linked successfully!");
     } else {
         logStr("ERROR: Shader failed to link!");
     }
+    return shader_program;
 }
 
 fn compile_pluto_shader() void {
@@ -473,59 +492,59 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
 
-    // // Render the background.
-    // glcontext.call("useProgram", .{background_shader_program}, void);
+    // Render the background.
+    glcontext.call("useProgram", .{background_shader_program}, void);
 
-    // // Calculate background_shader uniforms.
-    // const program_secs : f32 = @floatCast(time_seconds);    
-    // const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
+    // Calculate background_shader uniforms.
+    const program_secs : f32 = @floatCast(time_seconds);    
+    const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
 
-    // //@port, @temp
-    // animation_won_fraction = 0;
+    //@port, @temp
+    animation_won_fraction = 0;
     
-    // const radius_value : f32 = 0.018571486 * switch(is_won) {
-    //     false => 1,
-    //     true  => 1 - animation_won_fraction,
-    // };
+    const radius_value : f32 = 0.018571486 * switch(is_won) {
+        false => 1,
+        true  => 1 - animation_won_fraction,
+    };
 
-    // const lp_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("lp")}, zjb.Handle);
-    // const radius_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("radius")}, zjb.Handle);
+    const lp_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("lp")}, zjb.Handle);
+    const radius_uniform_location = glcontext.call("getUniformLocation", .{background_shader_program, zjb.constString("radius")}, zjb.Handle);
     
-    // glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
-    // glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
+    glcontext.call("uniform1f", .{lp_uniform_location, lp_value}, void);
+    glcontext.call("uniform1f", .{radius_uniform_location, radius_value}, void);
     
-    // // The Actual Drawing command!
-    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
-
-
-
-
-    // Render the photo!
-    glcontext.call("useProgram", .{pluto_shader_program}, void);
-
-    // Let the lambda uniform, which adjusts how gray the image is.    
-    const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    const speed = 4;
-    const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
-    const lambda = osc * osc;
-
-    const lambda_uniform_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("lambda")}, zjb.Handle);
-
-    glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
-
-    // Make the GPU use the pluto texture.
-    glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
-
-    const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
-    const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
-    
-    glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
-
-    const pluto_texture_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
-    glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
-    
-    // Draw the dwarf planet!
+    // The Actual Drawing command!
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
+
+
+
+
+    // // Render the photo!
+    // glcontext.call("useProgram", .{pluto_shader_program}, void);
+
+    // // Let the lambda uniform, which adjusts how gray the image is.    
+    // const time_seconds_f32 : f32 = @floatCast(time_seconds);
+    // const speed = 4;
+    // const osc : f32 = 0.5 * (1 + @sin(speed * time_seconds_f32));
+    // const lambda = osc * osc;
+
+    // const lambda_uniform_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("lambda")}, zjb.Handle);
+
+    // glcontext.call("uniform1f", .{lambda_uniform_location, lambda}, void);
+
+    // // Make the GPU use the pluto texture.
+    // glcontext.call("activeTexture", .{gl_TEXTURE0}, void);
+
+    // const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
+    // const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
+    
+    // glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
+
+    // const pluto_texture_location = glcontext.call("getUniformLocation", .{pluto_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
+    // glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
+    
+    // // Draw the dwarf planet!
+    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }

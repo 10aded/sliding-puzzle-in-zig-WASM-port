@@ -15,6 +15,10 @@ pub fn build(b: *std.Build) void {
     sliding_puzzle.root_module.addImport("zjb", zjb.module("zjb"));
     sliding_puzzle.entry = .disabled;
     sliding_puzzle.rdynamic = true;
+    //    sliding_puzzle.initial_memory = std.wasm.page_size * 100;
+    //    sliding_puzzle.max_memory = std.wasm.page_size * 1000;
+    sliding_puzzle.stack_size = std.wasm.page_size * 1000;
+    
 
     const extract_sliding_puzzle = b.addRunArtifact(zjb.artifact("generate_js"));
     const extract_sliding_puzzle_out = extract_sliding_puzzle.addOutputFileArg("zjb_extract.js");
