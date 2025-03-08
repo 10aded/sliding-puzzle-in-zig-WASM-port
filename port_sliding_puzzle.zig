@@ -102,19 +102,14 @@ const gl_UNSIGNED_BYTE      : i32 = 0x1401; // NOTE below!
 var is_won = false;
 
 // WebGL
-var glcontext      : zjb.Handle = undefined;
-
+var glcontext  : zjb.Handle = undefined;
 var global_vbo : zjb.Handle = undefined;
 
-// TODO... delete if needed
-var background_vbo : zjb.Handle = undefined;
-var triangle_vbo   : zjb.Handle = undefined;
-var background_shader_program : zjb.Handle = undefined;
-
+var background_shader_program    : zjb.Handle = undefined;
 var color_texture_shader_program : zjb.Handle = undefined;
 
 var blue_marble_texture  : zjb.Handle = undefined;
-var quote_texture  : zjb.Handle = undefined;
+var quote_texture        : zjb.Handle = undefined;
 
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
@@ -155,7 +150,8 @@ const quote_width  = quote_header.image_width;
 const quote_height = quote_header.image_height;
 var quote_pixel_bytes : [4 * quote_width * quote_height] u8 = undefined;
 
-// TODO: In order to call gl.texImage2D to make a texture,
+// Note for above:
+// In order to call gl.texImage2D to make a texture,
 // the bytes need to be in a Uint8Array (when gl.UNSIGNED_BYTE) is
 // called. (See: https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/texImage2D)
 // So, without knowing if the WASM will store @Vector(4, u8) in the
@@ -168,9 +164,6 @@ var quote_pixel_bytes : [4 * quote_width * quote_height] u8 = undefined;
 // [] u8 ... if this is even sensible to begin with... we get a
 // TODO: implement @ptrCast between slices changing the length compile error.
 
-
-
-
 export fn main() void {
 
     logStr("DEBUG: Program start!"); //@debug
@@ -182,10 +175,8 @@ export fn main() void {
     init_webgl_context();
 
     compile_shaders();
-      
-    //setup_background_array_buffer();
 
-    //setup_pluto_array_buffer();
+    create_bind_textures();
     
     logStr("Debug: Begin main loop.");
     
@@ -236,16 +227,14 @@ fn init_webgl_context() void {
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 
     // Create a WebGLBuffer.
-    // Since there is not VAO in WebGL,
-    // basically state saved so just make one VBO to get reused everywhere.
-    // ???
-
+    // Since there is not VAO in WebGL, there is (seeming?) no way to save attribute
+    // state... everything seems to be global so just make one VBO to get reused everywhere.
     global_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
 }
 
 fn compile_shaders() void {
-    const background_shader_attributes : [1] [:0] const u8 = .{ "aPos"};
+    const background_shader_attributes    : [1] [:0] const u8 = .{"aPos"};
     const color_texture_shader_attributes : [4] [:0] const u8 = .{"aPos", "aColor", "aTexCoord", "aLambda"};
     background_shader_program = compile_shader(vertex_background_source,
                                                fragment_background_source,
@@ -315,72 +304,7 @@ fn compile_shader( comptime vertex_shader_source : [:0] const u8, comptime fragm
     return shader_program;
 }
 
-fn setup_background_VBO() void {
-    // Define an rectangle to draw the fractal shader on.
-    const triangle_gpu_data : [6 * 2] f32 = .{
-        // xpos, ypos
-         1,  1,  // RT
-        -1,  1,  // LT
-         1, -1,  // RB
-        -1,  1,  // LT
-         1, -1,  // RB
-        -1, -1,  // LB
-    };
-
-    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
-    
-    // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
-//    background_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
-
-    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
-
-    // Set the VBO attributes.
-    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
-    glcontext.call("enableVertexAttribArray", .{0}, void);
-    glcontext.call("vertexAttribPointer", .{
-        0,                // index
-        2,                // number of components
-        gl_FLOAT,         // type
-        false,            // normalize
-        2 * @sizeOf(f32), // stride
-        0 * @sizeOf(f32), // offset
-        }, void);
-}
-
-fn setup_color_vertex_VBO() void {
-    // Define an equilateral RGB triangle.
-        const triangle_gpu_data : [6 * 8] f32 = .{
-            // x, y, r, g, b, tx, ty, l,
-             1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
-            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-            -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
-    };
-    
-    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
-    
-    // Create a WebGLBuffer, seems similar to making a VBO via gl.genBuffers in pure OpenGL.
-    //triangle_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
-
-    //glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, triangle_vbo}, void);
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
-
-    // Set the VBO attributes.
-    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders.
-
-    glcontext.call("enableVertexAttribArray", .{0}, void);
-    glcontext.call("enableVertexAttribArray", .{1}, void);
-    glcontext.call("enableVertexAttribArray", .{2}, void);
-    glcontext.call("enableVertexAttribArray", .{3}, void);
-
-    glcontext.call("vertexAttribPointer", .{0, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 0 * @sizeOf(f32)}, void);
-    glcontext.call("vertexAttribPointer", .{1, 3, gl_FLOAT, false, 8 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
-    glcontext.call("vertexAttribPointer", .{2, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 5 * @sizeOf(f32)}, void);
-    glcontext.call("vertexAttribPointer", .{3, 1, gl_FLOAT, false, 8 * @sizeOf(f32), 7 * @sizeOf(f32)}, void);
-
+fn create_bind_textures() void {
     // Setup blue marble texture.
     blue_marble_texture = glcontext.call("createTexture", .{}, zjb.Handle);
     glcontext.call("bindTexture", .{gl_TEXTURE_2D, blue_marble_texture}, void);
@@ -419,17 +343,65 @@ fn setup_color_vertex_VBO() void {
     // Note: The width and height have type "GLsizei"... i.e. a i32.
     const q_width  : i32 = @intCast(quote_width);
     const q_height : i32 = @intCast(quote_height);
-
-    // !!! VERY IMPORTANT !!!
-    // gl.texImage2D accepts a pixel source ONLY with type "Uint8Array". As such,
-    // applying a zjb.dataView() to the pixels will result in NO texture being drawn.
-    // Instead, use zjb.u8ArrayView().
-    //
-    // We spent something like 2 hours debugging this. Worst debugging experience of 2025 so far.
-    
     const q_pixel_data_obj = zjb.u8ArrayView(&quote_pixel_bytes);
     
     glcontext.call("texImage2D", .{gl_TEXTURE_2D, 0, gl_RGBA, q_width, q_height, 0, gl_RGBA, gl_UNSIGNED_BYTE, q_pixel_data_obj}, void);
+}
+
+fn setup_background_VBO() void {
+    // Define an rectangle to draw the fractal shader on.
+    const background_triangle_gpu_data : [6 * 2] f32 = .{
+        // xpos, ypos
+         1,  1,  // RT
+        -1,  1,  // LT
+         1, -1,  // RB
+        -1,  1,  // LT
+         1, -1,  // RB
+        -1, -1,  // LB
+    };
+
+    const gpu_data_obj = zjb.dataView(&background_triangle_gpu_data);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(background_triangle_gpu_data))}, void);
+
+    // Set the VBO attributes.
+    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders. 
+    glcontext.call("enableVertexAttribArray", .{0}, void);
+    glcontext.call("vertexAttribPointer", .{
+        0,                // index
+        2,                // number of components
+        gl_FLOAT,         // type
+        false,            // normalize
+        2 * @sizeOf(f32), // stride
+        0 * @sizeOf(f32), // offset
+        }, void);
+}
+
+fn setup_color_vertex_VBO() void {
+    // Define an equilateral RGB triangle.
+        const triangle_gpu_data : [6 * 8] f32 = .{
+            // x, y, r, g, b, tx, ty, l,
+             1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
+            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+            -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
+             1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
+            -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
+    };
+    
+    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
+
+    // Set the VBO attributes.
+    // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders.
+    glcontext.call("enableVertexAttribArray", .{0}, void);
+    glcontext.call("enableVertexAttribArray", .{1}, void);
+    glcontext.call("enableVertexAttribArray", .{2}, void);
+    glcontext.call("enableVertexAttribArray", .{3}, void);
+
+    glcontext.call("vertexAttribPointer", .{0, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 0 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{1, 3, gl_FLOAT, false, 8 * @sizeOf(f32), 2 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{2, 2, gl_FLOAT, false, 8 * @sizeOf(f32), 5 * @sizeOf(f32)}, void);
+    glcontext.call("vertexAttribPointer", .{3, 1, gl_FLOAT, false, 8 * @sizeOf(f32), 7 * @sizeOf(f32)}, void);
 }
 
 
