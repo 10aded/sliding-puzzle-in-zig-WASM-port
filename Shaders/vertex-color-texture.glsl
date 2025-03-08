@@ -12,10 +12,10 @@ varying vec2  TexCoord;
 varying float Lambda;
 
 void main() {
-  vec2 unit_square_pos = aPos / 2000.0;
-  // vec2 normalized = 2.0 * unit_square_pos - 1.0;
-  // vec2 inverted   = vec2(normalized.x, -normalized.y);
-  gl_Position     = vec4(unit_square_pos, 0, 1);
+  vec2 unit_square_pos = aPos / 500.0;
+  vec2 normalized = 2.0 * unit_square_pos - 1.0;
+  vec2 inverted   = vec2(normalized.x, -normalized.y);
+  gl_Position     = vec4(inverted, 0, 1);
 
   Color    = aColor;
   TexCoord = aTexCoord;

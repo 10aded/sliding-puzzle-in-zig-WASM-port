@@ -60,8 +60,15 @@ const fragment_background_source = @embedFile("./Shaders/fragment-background.gls
 const vertex_color_texture_source   = @embedFile("./Shaders/vertex-color-texture.glsl");
 const fragment_color_texture_source = @embedFile("./Shaders/fragment-color-texture.glsl");
 
+const PI : f32 = std.math.pi;
+
 const CANVAS_WIDTH  : i32 = 500;
 const CANVAS_HEIGHT : i32 = 500;
+
+const GRID_DIMENSION = 3;
+
+// Constants
+const TILE_NUMBER = GRID_DIMENSION * GRID_DIMENSION;
 
 // Colors
 const WHITE       = Color{255,   255,  255, 255};
@@ -73,9 +80,21 @@ const DEBUG_COLOR       = MAGENTA;
 const GRID_BACKGROUND   = WHITE;
 const TILE_BORDER       = GRID_BLUE;
 
-// Constants
-const PI : f32 = std.math.pi;
+// Shader
 const BACKGROUND_SHADER_SHAPE_CHANGE_TIME = 200;
+
+// Grid geometry.
+// NOTE: It is assumed that the window dimensions of the game
+// will NOT change.
+const TILE_WIDTH : f32  = 50;
+const TILE_BORDER_WIDTH = 0.05 * TILE_WIDTH;
+const TILE_SPACING      = 0.02 * TILE_WIDTH;
+
+const CENTER : Vec2 = .{250, 250};
+
+const GRID_WIDTH = GRID_DIMENSION * TILE_WIDTH + (GRID_DIMENSION + 1) * TILE_SPACING + 2 * GRID_DIMENSION * TILE_BORDER_WIDTH;
+
+
 
 // Type aliases.
 const Vec2  = @Vector(2, f32);
@@ -125,13 +144,29 @@ var color_texture_shader_program : zjb.Handle = undefined;
 var blue_marble_texture  : zjb.Handle = undefined;
 var quote_texture        : zjb.Handle = undefined;
 
+// Grid
+// Convention: the left to right array layout represents the grid
+// per row from left to right, top to bottom.
+var grid : [TILE_NUMBER] u8 = undefined;
+
+// Grid movement
+const GridMovementDirection = enum (u8) {
+    NONE,
+    UP,
+    LEFT,
+    DOWN,
+    RIGHT,
+};
+
+var current_tile_movement_direction : GridMovementDirection = .NONE;
+
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
 const ANIMATION_WON_TIME          : f32 = 3;
 const ANIMATION_QUOTE_TIME        : f32 = 3;
 
 var animating_tile : u8 = 0;
-//var animation_direction : GridMovementDirection = undefined;
+var animation_direction : GridMovementDirection = undefined;
 
 var animation_tile_fraction  : f32 = 0;
 var animation_won_fraction   : f32 = 0;
@@ -158,7 +193,7 @@ const blue_marble_width  = blue_marble_header.image_width;
 const blue_marble_height = blue_marble_header.image_height;
 var blue_marble_pixel_bytes : [4 * blue_marble_width * blue_marble_height] u8 = undefined;
 
-const quote_qoi = @embedFile("./Assets/blue.qoi");
+const quote_qoi = @embedFile("./Assets/quote.qoi");
 const quote_header = qoi.comptime_header_parser(quote_qoi);
 const quote_width  = quote_header.image_width;
 const quote_height = quote_header.image_height;
@@ -216,6 +251,8 @@ export fn main() void {
     
     init_clock();
 
+    init_grid();
+
     decompress_images();
     
     init_webgl_context();
@@ -227,6 +264,116 @@ export fn main() void {
     logStr("Debug: Begin main loop.");
     
     animationFrame(initial_timestamp);
+}
+
+// TODO... replace with proper version...
+fn init_grid() void {
+    grid = std.simd.iota(u8, TILE_NUMBER);
+}
+
+fn compute_grid_geometry() void {
+
+    // Reset the vertex_buffer.
+    vertex_buffer_index = 0;
+    
+    const lambda = animation_won_fraction;
+        
+    // Compute the tile rectangles.
+    const background_grid_rectangle = rectangle(CENTER, GRID_WIDTH, GRID_WIDTH);
+
+    var grid_tile_rectangles : [TILE_NUMBER] Rectangle = undefined;
+
+    const TOP_LEFT_TILE_POSX = CENTER[0] - 0.5 * GRID_WIDTH + TILE_SPACING + TILE_BORDER_WIDTH + 0.5 * TILE_WIDTH;
+    const TOP_LEFT_TILE_POSY = TOP_LEFT_TILE_POSX;
+
+    for (0..GRID_DIMENSION) |j| {
+        const posy = TOP_LEFT_TILE_POSX + @as(f32, @floatFromInt(j)) * (TILE_SPACING + 2 * TILE_BORDER_WIDTH + TILE_WIDTH);
+        for (0..GRID_DIMENSION) |i| {
+            const posx = TOP_LEFT_TILE_POSY + @as(f32, @floatFromInt(i)) * (TILE_SPACING + 2 * TILE_BORDER_WIDTH + TILE_WIDTH);
+            const tile_rect = rectangle(.{posx, posy}, TILE_WIDTH, TILE_WIDTH);
+            grid_tile_rectangles[j * GRID_DIMENSION + i] = tile_rect;
+        }
+    }
+
+    // Draw the grid background.
+    draw_color_texture_rectangle(background_grid_rectangle, GRID_BACKGROUND, .{0, 0}, .{1, 1}, lambda);
+
+    const TILE_BORDER_RECT_WIDTH = 2 * TILE_BORDER_WIDTH + TILE_WIDTH;
+
+    const tile_border_width_splat : Vec2 = @splat(TILE_BORDER_WIDTH);
+    const tile_width_splat        : Vec2 = @splat(TILE_WIDTH);
+    const grid_width_splat        : Vec2 = @splat(GRID_WIDTH);
+    
+    // Draw the tiles.
+    for (grid, 0..) |tile, i| {
+        if (tile == 0 or tile == animating_tile) { continue; }
+
+        const rect = grid_tile_rectangles[i];
+        const tile_border_rect = rectangle(rect.center, TILE_BORDER_RECT_WIDTH, TILE_BORDER_RECT_WIDTH);
+
+        // Calculate the texture tl of the tile (that is, the thing inside the border).
+        const tilex : f32 = @floatFromInt(tile % GRID_DIMENSION);
+        const tiley : f32 = @floatFromInt(tile / GRID_DIMENSION);
+        
+        const tl_x = (2 * tilex + 1) * TILE_BORDER_WIDTH + (tilex + 1 ) * TILE_SPACING + tilex * TILE_WIDTH;
+        const tl_y = (2 * tiley + 1) * TILE_BORDER_WIDTH + (tiley + 1 ) * TILE_SPACING + tiley * TILE_WIDTH;
+
+        const tl_inner = Vec2{tl_x, tl_y};
+        const tl_outer = tl_inner - tile_border_width_splat;
+        const br_inner = tl_inner + tile_width_splat;
+        const br_outer = br_inner + tile_border_width_splat;
+
+        const tl_inner_st = tl_inner / grid_width_splat;
+        const tl_outer_st = tl_outer / grid_width_splat;
+        const br_inner_st = br_inner / grid_width_splat;
+        const br_outer_st = br_outer / grid_width_splat;
+        
+        draw_color_texture_rectangle(tile_border_rect, TILE_BORDER, tl_outer_st, br_outer_st, lambda);
+        draw_color_texture_rectangle(rect,             DEBUG_COLOR, tl_inner_st, br_inner_st, 1);
+    }
+
+    // Draw the animating tile (if non-zero).
+    if (animating_tile != 0) {
+        
+        const animating_tile_index_tilde = find_tile_index(animating_tile);
+        const animating_tile_index : u8 = @intCast(animating_tile_index_tilde.?);
+
+        const final_tile_rect = grid_tile_rectangles[animating_tile_index];
+        const final_tile_pos = final_tile_rect.center;
+
+        const ANIMATION_DISTANCE = TILE_WIDTH + 2 * TILE_BORDER_WIDTH + TILE_SPACING;
+        const AD = ANIMATION_DISTANCE;
+        
+        const animation_splat : Vec2 = @splat(1 - animation_tile_fraction);
+        const animation_offset_vec : Vec2 = switch(animation_direction) {
+            .NONE => unreachable,
+            .UP   => .{0, AD},
+            .LEFT => .{AD, 0},
+            .DOWN => .{0, -AD},
+            .RIGHT => .{-AD, 0},
+        };
+        const animating_tile_pos = final_tile_pos + animation_splat * animation_offset_vec;
+
+        const animating_tile_rect        = rectangle(animating_tile_pos, final_tile_rect.width, final_tile_rect.height);
+        const animating_tile_border_rect = rectangle(animating_tile_pos, TILE_BORDER_RECT_WIDTH, TILE_BORDER_RECT_WIDTH);
+
+        // Calculate the texture tl of the tile.
+        // A partial copy from above.
+        const tilex : f32 = @floatFromInt(animating_tile % GRID_DIMENSION);
+        const tiley : f32 = @floatFromInt(animating_tile / GRID_DIMENSION);
+        
+        const tl_x = (2 * tilex + 1) * TILE_BORDER_WIDTH + tilex * (TILE_WIDTH + TILE_SPACING);
+        const tl_y = (2 * tiley + 1) * TILE_BORDER_WIDTH + tiley * (TILE_WIDTH + TILE_SPACING);
+
+        const tl_inner = Vec2{tl_x, tl_y};
+        const br_inner = tl_inner + tile_width_splat;
+        
+        const tl_inner_st    = tl_inner / grid_width_splat;
+        const br_inner_st    = br_inner / grid_width_splat;
+
+        draw_color_texture_rectangle(animating_tile_border_rect, TILE_BORDER, .{0, 0}, .{1, 1}, lambda);
+        draw_color_texture_rectangle(animating_tile_rect,        DEBUG_COLOR, tl_inner_st, br_inner_st, 1);
+    }
 }
 
 // Figure out and store the GPU data that will draw a rectangle
@@ -474,20 +621,7 @@ fn setup_background_VBO() void {
 }
 
 fn setup_color_vertex_VBO() void {
-    // // Define an equilateral RGB triangle.
-    //     const triangle_gpu_data : [6 * 8] f32 = .{
-    //         // x, y, r, g, b, tx, ty, l,
-    //          1,  0,  0.5, 0.5, 0.5, 1, 0, 0.5, // RT
-    //         -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-    //          1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-    //         -1,  0,  0.5, 0.5, 0.5, 0, 0, 0.5, // LT
-    //          1, -1,  0.5, 0.5, 0.5, 1, 1, 0.5, // RB
-    //         -1, -1,  0.5, 0.5, 0.5, 0, 1, 0.5, // LB
-    // };
-    
-    //    const gpu_data_obj = zjb.dataView(&triangle_gpu_data);
-    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, 4000 * @sizeOf(f32), gl_DYNAMIC_DRAW}, void); //, 0, @sizeOf(@TypeOf(background_triangle_gpu_data))}, void);
-//    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, gpu_data_obj, gl_STATIC_DRAW, 0, @sizeOf(@TypeOf(triangle_gpu_data))}, void);
+    glcontext.call("bufferData", .{gl_ARRAY_BUFFER, 4000 * @sizeOf(f32), gl_DYNAMIC_DRAW}, void);
 
     // Set the VBO attributes.
     // NOTE: The index (locations) were specified just before linking the vertex and fragment shaders.
@@ -507,6 +641,9 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
     // NOTE: The timestamp is in milliseconds.
     const time_seconds = timestamp / 1000;
+
+
+    compute_grid_geometry();
     
     // Render the background color.
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
@@ -519,9 +656,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // Calculate background_shader uniforms.
     const program_secs : f32 = @floatCast(time_seconds);    
     const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
-
-    //@port, @temp
-    animation_won_fraction = 1;
     
     const radius_value : f32 = 0.018571486 * switch(is_won) {
         false => 1,
@@ -540,21 +674,29 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // Render the tiles.
     setup_color_vertex_VBO();
     glcontext.call("useProgram", .{color_texture_shader_program}, void);
+    glcontext.call("bindTexture", .{gl_TEXTURE_2D, blue_marble_texture}, void);    
 
-    // // Alternate the texture.
-    // const time_seconds_f32 : f32 = @floatCast(time_seconds);
-    // const time_whole_seconds : i32 = @intFromFloat(time_seconds_f32);
-    // const curr_texture = if (time_whole_seconds & 1 == 0) blue_marble_texture else quote_texture;
+    // Convert the bufferdata into a [] f32
+    var vertex_buffer_f32 : [8 * 4000] f32 = undefined;
+
+    for (0..vertex_buffer_index) |i| {
+        vertex_buffer_f32[8 * i + 0] = vertex_buffer[i].x;
+        vertex_buffer_f32[8 * i + 1] = vertex_buffer[i].y;
+        vertex_buffer_f32[8 * i + 2] = vertex_buffer[i].r;
+        vertex_buffer_f32[8 * i + 3] = vertex_buffer[i].g;
+        vertex_buffer_f32[8 * i + 4] = vertex_buffer[i].b;
+        vertex_buffer_f32[8 * i + 5] = vertex_buffer[i].tx;
+        vertex_buffer_f32[8 * i + 6] = vertex_buffer[i].ty;
+        vertex_buffer_f32[8 * i + 7] = vertex_buffer[i].l;
+    }
+
+    const tile_gpu_data = vertex_buffer_f32[0..8 * vertex_buffer_index];
     
-    // glcontext.call("bindTexture", .{gl_TEXTURE_2D, curr_texture}, void);
+    const tile_gpu_data_obj = zjb.dataView(tile_gpu_data);
 
-    // const pluto_texture_location = glcontext.call("getUniformLocation", .{color_texture_shader_program, zjb.constString("pluto_texture")}, zjb.Handle);
-    // glcontext.call("uniform1i", .{pluto_texture_location, 0}, void);
+    glcontext.call("bufferSubData", .{gl_ARRAY_BUFFER, 0, tile_gpu_data_obj}, void);
+    glcontext.call("drawArrays", .{gl_TRIANGLES, 0, @as(i32, @intCast(vertex_buffer_index))}, void);
     
-    // // Draw the dwarf planet!
-    // glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
-
-
     // Reset the vertex_buffer.
     vertex_buffer_index = 0;
     
@@ -565,14 +707,13 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // which informed the values below.
     const quote_width_f32  : f32 = @floatFromInt(quote_width);
     const quote_height_f32 : f32 = @floatFromInt(quote_height);
-    const quote_pos : Vec2 = .{550, 825};
-    const quote_rectangle = rectangle(quote_pos, quote_width_f32, quote_height_f32);
+    const quote_pos : Vec2 = .{225, 400};
+    const quote_rectangle = rectangle(quote_pos, 0.5 * quote_width_f32, 0.5 * quote_height_f32);
 
-    animation_quote_fraction = 1;
     draw_color_texture_rectangle(quote_rectangle, SPACE_BLACK, .{0,0}, .{1, 1}, animation_quote_fraction);
 
     // Convert the bufferdata into a [] f32
-    var vertex_buffer_f32 : [8 * 500] f32 = undefined;
+//    var vertex_buffer_f32 : [8 * 6] f32 = undefined;
 
     for (0..vertex_buffer_index) |i| {
         vertex_buffer_f32[8 * i + 0] = vertex_buffer[i].x;
@@ -589,21 +730,20 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     
     const quote_gpu_data_obj = zjb.dataView(quote_gpu_data);
 
-    if (temp) {
-        for (quote_gpu_data) |float| {
-            log(float);
-        }
-        temp = false;
-    }
+
     
     // Draw the quote.
     glcontext.call("bufferSubData", .{gl_ARRAY_BUFFER, 0, quote_gpu_data_obj}, void);
-    // gl.bufferSubData(gl.ARRAY_BUFFER,
-    //                  0,
-    //                  @as(c_int, @intCast(vertex_buffer_index)) * 8 * @sizeOf(f32),
-    //                  &vertex_buffer[0]);
-
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, @as(i32, @intCast(vertex_buffer_index))}, void);
+
+    vertex_buffer_index = 0;
     
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
+}
+
+fn find_tile_index( wanted_tile : u8) ?usize {
+    for (grid, 0..) |tile, i| {
+        if (tile == wanted_tile) { return i; }
+    }
+    return null;
 }
