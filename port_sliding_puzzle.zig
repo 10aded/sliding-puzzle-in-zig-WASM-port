@@ -163,6 +163,9 @@ const GridMovementDirection = enum (u8) {
 
 var current_tile_movement_direction : GridMovementDirection = .NONE;
 
+// Random number generator
+var global_prng : XorShiftPRNG = undefined;
+
 // Animation
 const ANIMATION_SLIDING_TILE_TIME : f32 = 0.15;
 const ANIMATION_WON_TIME          : f32 = 3;
@@ -282,9 +285,47 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
 
 
-// TODO... replace with proper version...
 fn init_grid() void {
+    // Initialize PRNG.
+    const seed : u64 = @bitCast(initial_seconds);
+    global_prng = initialize_xorshiftprng(seed);
+
+    // NOTE: Initializing the grid with a random shuffle will produce
+    // a puzzle that is IMPOSSIBLE to solve 50% of the time. (This
+    // fact is left as a highly recommended exercise to the reader.)
+    //
+    // Additionally, from a starting solved state randomly applying
+    // grid moves will not in general create a grid that is
+    // "sufficiently" shuffled. See, for example:
+    //
+    //     https://en.wikipedia.org/wiki/Random_walk#Lattice_random_walk
+    //
+    // As such we apply a SMALL number of pre-generated shuffles that
+    // make the grid appear "randomly" shuffled.
+
+    // File the grid with 0, 1, 2, ... , TILE_NUMBER - 1.
     grid = std.simd.iota(u8, TILE_NUMBER);
+
+    // Some prerecorded tile shuffles.
+    const shuffle1 = [_] u8 {2, 1, 4, 1, 2, 3, 2, 1, 4, 1, 2, 3, 4, 2, 2, 1, 4, 4, 3, 2, 3, 2, 1, 4, 3, 3, 4, 1, 1, 1, 4, 3, 2, 2, 3, 4, 1, 2, 1, 4, 3, 2, 3, 4, 3, 2, 1, 2, 3, 4, 4, 1, 1, 4, 3, 2, 1, 3, 1, 4, 1, 2, 2, 2, 3, 4, 4, 3, 2, 1, 4, 4, 3, 2, 2, 2, 3, 4, 1, 1, 4, 3, 3, 4, 1, 1, 2, 2, 3, 4, 1, 4, 1, 2, 2, 3, 4, 3, 2, 1, 2, 1, 4, 3, 3, 4, 3, 2, 2, 1, 4, 3, 4, 4, 2, 2, 1, 1, 2, 1, 4, 4, 3, 3, 2, 1, 4, 3, 2, 1, 4, 3, 4, 3, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4, 1, 1, 4, 3, 2, 3, 4};
+
+    const shuffle2 = [_] u8 {2, 2, 1, 4, 4, 2, 1, 1, 2, 3, 4, 3, 2, 2, 4, 3, 4, 1, 1, 1, 4, 3, 3, 2, 1, 4, 3, 2, 2, 1, 4, 3, 2, 2, 1, 4, 1, 2, 3, 4, 4, 1, 3, 3, 2, 1, 4, 3, 3, 2, 1, 4, 3, 4, 1, 1, 2, 1, 2, 3, 4, 3, 2, 2, 3, 4, 1, 1, 4, 2, 1, 2, 3, 4, 4, 3, 4, 1, 3, 2, 3, 4, 1, 1, 2, 1, 4, 3, 2, 2, 3, 4, 1, 2, 3, 2, 1, 4, 3, 3, 4, 4, 1, 1, 1, 2, 3, 4, 2, 2, 3, 4, 1, 2, 3, 4, 4, 3, 2, 2, 2, 1, 1, 1, 4, 3, 3, 2, 3, 4, 1, 2, 1, 4, 1, 2, 3, 4, 4, 3, 4, 3};
+
+    const shuffles = [2] [] const u8 {shuffle1[0..], shuffle2[0..]};
+    // Apply these each a couple of times, randomly.
+    
+    const NUMBER_OF_SHUFFLES = 10;
+    
+    var shuffle_index : usize = 0;
+    while (shuffle_index < NUMBER_OF_SHUFFLES) : (shuffle_index += 1) {
+        const random_int = get_randomish_byte_up_to(2);
+        const random_shuffle = shuffles[random_int];
+
+        for (random_shuffle) |dir| {
+            const move_direction : GridMovementDirection = @enumFromInt(dir);
+            try_grid_update(move_direction);
+        }
+    }
 }
 
 fn compute_grid_geometry() void {
@@ -652,6 +693,54 @@ fn setup_color_vertex_VBO() void {
     glcontext.call("vertexAttribPointer", .{3, 1, gl_FLOAT, false, 8 * @sizeOf(f32), 7 * @sizeOf(f32)}, void);
 }
 
+// Try and move and calculate the new grid configuration (if it changes).
+fn try_grid_update(tile_movement_direction : GridMovementDirection) void {
+    // E.g.
+    //
+    // 0 1  -- LEFT -->  1 0
+    // 2 3               2 3
+
+    // 1 2               1 0
+    // 3 0  -- DOWN -->  3 2
+    
+    // Find empty tile.
+    const empty_tile_index_tilde = find_tile_index(0);
+    const empty_tile_index : u8 = @intCast(empty_tile_index_tilde.?);
+
+    const empty_tile_posx = empty_tile_index % GRID_DIMENSION;
+    const empty_tile_posy = empty_tile_index / GRID_DIMENSION;
+
+    // Determine if the grid needs to be updated.
+    const no_grid_update : bool = switch(tile_movement_direction) {
+        .NONE  => true,
+        .UP    => empty_tile_posy == GRID_DIMENSION - 1,
+        .LEFT  => empty_tile_posx == GRID_DIMENSION - 1,
+        .DOWN  => empty_tile_posy == 0,
+        .RIGHT => empty_tile_posx == 0,
+    };
+
+    // Cancel any existing animation if a movement key was pressed
+    // but the grid cannot be updated.
+    if (no_grid_update and tile_movement_direction != .NONE) {
+        animating_tile = 0;
+    }
+
+    // Update the grid.
+    if (! no_grid_update and ! is_won) {
+        const swap_tile_index : usize = switch(tile_movement_direction) {
+            .NONE  => unreachable,
+            .UP    => empty_tile_index + GRID_DIMENSION,
+            .LEFT  => empty_tile_index + 1,
+            .DOWN  => empty_tile_index - GRID_DIMENSION,
+            .RIGHT => empty_tile_index - 1,
+        };
+
+        grid[empty_tile_index] = grid[swap_tile_index];
+        grid[swap_tile_index] = 0;
+        animating_tile = grid[empty_tile_index];
+        animation_direction = tile_movement_direction;
+    }
+}
 
 fn render() void {
     // Render the background color.
@@ -754,4 +843,47 @@ fn find_tile_index( wanted_tile : u8) ?usize {
         if (tile == wanted_tile) { return i; }
     }
     return null;
+}
+
+fn get_randomish_byte( prng : *XorShiftPRNG) u8 {
+    // Pick a byte near the 'middle'.
+    const byte : u8 = @truncate(prng.state >> 32);
+    prng.update_state();
+    return byte;
+}
+
+// Return a random number from 0..<limit <= 255.
+fn get_randomish_byte_up_to(limit : u8) u8 {
+    const remainder = 255 % limit;
+    const modulo_limit = (255 - remainder) - 1;
+    var random_byte : u8 = 0;
+    while (true) {
+        random_byte = get_randomish_byte(&global_prng);
+        if (random_byte <= modulo_limit) {
+            break;
+        }
+    }
+    const final_byte = random_byte % limit;
+    return final_byte;
+}
+
+const XorShiftPRNG = struct {
+    state : u64,
+
+    fn update_state(self : *XorShiftPRNG) void {
+        const x1 = self.state; 
+        const x2 = x1 ^ (x1 << 13);
+        const x3 = x2 ^ (x2 >> 7);
+        const x4 = x3 ^ (x3 << 17);
+        self.state = x4;
+    }
+};
+
+fn initialize_xorshiftprng( seed : u64 ) XorShiftPRNG {
+    var xorshiftprng = XorShiftPRNG{ .state = seed };
+    for (0..10) |i| {
+        _ = i;
+        xorshiftprng.update_state();
+    }
+    return xorshiftprng;
 }
