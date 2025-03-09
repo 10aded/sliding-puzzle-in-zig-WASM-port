@@ -253,8 +253,6 @@ fn rectangle(pos : Vec2, width : f32, height : f32) Rectangle {
 
 
 export fn main() void {
-    logStr("DEBUG: Program start!"); //@debug
-    
     init_clock();
 
     init_grid();
@@ -267,7 +265,7 @@ export fn main() void {
 
     create_bind_textures();
     
-    logStr("Debug: Begin main loop.");
+    // logStr("Debug: Begin main loop.");
     
     animationFrame(initial_seconds);
 }
@@ -276,6 +274,10 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     // NOTE: The timestamp is in milliseconds.
     program_seconds = timestamp / 1000;
 
+    // TODO... port of process_input / poll events.
+
+    // copy in update_state()
+    
     compute_grid_geometry();
 
     render();
@@ -419,8 +421,8 @@ fn compute_grid_geometry() void {
         const tilex : f32 = @floatFromInt(animating_tile % GRID_DIMENSION);
         const tiley : f32 = @floatFromInt(animating_tile / GRID_DIMENSION);
         
-        const tl_x = (2 * tilex + 1) * TILE_BORDER_WIDTH + tilex * (TILE_WIDTH + TILE_SPACING);
-        const tl_y = (2 * tiley + 1) * TILE_BORDER_WIDTH + tiley * (TILE_WIDTH + TILE_SPACING);
+        const tl_x = (2 * tilex + 1) * TILE_BORDER_WIDTH + (tilex + 1 ) * TILE_SPACING + tilex * TILE_WIDTH;
+        const tl_y = (2 * tiley + 1) * TILE_BORDER_WIDTH + (tiley + 1 ) * TILE_SPACING + tiley * TILE_WIDTH;
 
         const tl_inner = Vec2{tl_x, tl_y};
         const br_inner = tl_inner + tile_width_splat;
