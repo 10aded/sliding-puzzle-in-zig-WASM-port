@@ -67,7 +67,7 @@ const PI : f32 = std.math.pi;
 // values below.
 const CANVAS_DIMS : @Vector(2, i32) = .{800, 800};
 
-const GRID_DIMENSION = 3;
+const GRID_DIMENSION = 2;
 
 // Constants
 const TILE_NUMBER = GRID_DIMENSION * GRID_DIMENSION;
@@ -421,7 +421,8 @@ fn compute_grid_geometry() void {
         const ANIMATION_DISTANCE = TILE_WIDTH + 2 * TILE_BORDER_WIDTH + TILE_SPACING;
         const AD = ANIMATION_DISTANCE;
         
-        const animation_splat : Vec2 = @splat(1 - animation_tile_fraction);
+        const animation_splat : Vec2 = @splat(1 - animation_tile_fraction
+                                              );
         const animation_offset_vec : Vec2 = switch(animation_direction) {
             .NONE => unreachable,
             .UP   => .{0, AD},
@@ -757,17 +758,9 @@ fn process_input() void {
     if (@as(u8, @bitCast(keyPressEvent)) != 0) {
         keyDown = keyPressEvent;
         keyPressEvent = @bitCast(@as(u8, 0));
+    } else {
+        keyDown = @bitCast(@as(u8, 0));
     }
-    
-    // keyDown.w           = keyPressEvent.w;
-    // keyDown.a           = glfw.getKey(window, glfw.Key.a) == glfw.Action.press;
-    // keyDown.s           = glfw.getKey(window, glfw.Key.s) == glfw.Action.press;
-    // keyDown.d           = glfw.getKey(window, glfw.Key.d) == glfw.Action.press;
-    
-    // keyDown.up_arrow    = glfw.getKey(window, glfw.Key.up)     == glfw.Action.press;
-    // keyDown.left_arrow  = glfw.getKey(window, glfw.Key.left)   == glfw.Action.press;
-    // keyDown.down_arrow  = glfw.getKey(window, glfw.Key.down)   == glfw.Action.press;
-    // keyDown.right_arrow = glfw.getKey(window, glfw.Key.right)  == gl1fw.Action.press;
 
     keyPress = @bitCast(@as(u8, @bitCast(keyDown)) & ~ @as(u8, @bitCast(keyDownLastFrame)));
 }
@@ -811,9 +804,10 @@ fn update_state() void {
 
     // Calculate the animation_won_fraction.
     if (is_won) {
-        const secs_since_won : f32 = @floatCast(won_start_seconds - current_seconds);
+        const secs_since_won : f32 = @floatCast(current_seconds - won_start_seconds);
         animation_won_fraction   = std.math.clamp(secs_since_won, 0, ANIMATION_WON_TIME) / ANIMATION_WON_TIME;
         animation_quote_fraction = std.math.clamp(secs_since_won - ANIMATION_WON_TIME + 1, 0, ANIMATION_QUOTE_TIME) / ANIMATION_QUOTE_TIME;
+        log(secs_since_won);
     }
 }
 // Try and move and calculate the new grid configuration (if it changes).
