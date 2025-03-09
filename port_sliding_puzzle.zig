@@ -178,9 +178,27 @@ var animation_tile_fraction  : f32 = 0;
 var animation_won_fraction   : f32 = 0;
 var animation_quote_fraction : f32 = 0;
 
+// Keyboard
+const KeyState = packed struct (u8) {
+    w           : bool,
+    a           : bool,
+    s           : bool,
+    d           : bool,
+    up_arrow    : bool,
+    left_arrow  : bool,
+    down_arrow  : bool,
+    right_arrow : bool,
+};
+
+var keyDownLastFrame : KeyState = @bitCast(@as(u8, 0));
+var keyDown          : KeyState = @bitCast(@as(u8, 0));
+var keyPress         : KeyState = @bitCast(@as(u8, 0));
+
 // Timestamp
-var initial_seconds : f64 = undefined;
-var program_seconds : f64 = undefined;
+var initial_seconds         : f64 = undefined;
+var current_seconds         : f64 = undefined;
+var animation_start_seconds : f32 = undefined;
+var won_start_seconds       : f32 = undefined;
 
 fn log(v: anytype) void {
     zjb.global("console").call("log", .{v}, void);
@@ -272,11 +290,11 @@ export fn main() void {
 
 fn animationFrame(timestamp: f64) callconv(.C) void {
     // NOTE: The timestamp is in milliseconds.
-    program_seconds = timestamp / 1000;
+    current_seconds = timestamp / 1000;
 
-    // TODO... port of process_input / poll events.
+    process_input();
 
-    // copy in update_state()
+    update_state();
     
     compute_grid_geometry();
 
@@ -525,6 +543,7 @@ fn init_webgl_context() void {
     canvas.set("width",  CANVAS_DIMS[0]);
     canvas.set("height", CANVAS_DIMS[1]);
 
+    // Deal with the super offensive keyboard event API. Thank you Web API committes.
     zjb.global("document").call("addEventListener", .{ zjb.constString("keydown"), zjb.fnHandle("keydownCallback", keydownCallback) }, void);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
@@ -536,10 +555,34 @@ fn init_webgl_context() void {
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
 }
 
+var keyPressEvent : KeyState = undefined;
+
 fn keydownCallback(event: zjb.Handle) callconv(.C) void {
     defer event.release();
 
-    zjb.global("console").call("log", .{ zjb.constString("From keydown callback, event:"), event }, void);
+    // Note: the .keyCode property is depreciated, but is
+    // also not a bloody string.
+    // Clearly, creating a i32 enum that represented keyboard
+    // keys being pressed was too difficult for the WebAPI committees
+    // who designed fthis. (Maybe none of them had even used an
+    // enum when programming!)
+    // We refuse to do a string comparison to figure out what
+    // keys have been pressed, so will use depreciated way of
+    // doing this, which just passes an integer.
+    
+    const keyCode : i32 = event.get("keyCode", i32);
+
+    switch (keyCode) {
+        87 => { keyPressEvent.w = true; },
+        65 => { keyPressEvent.a = true; },
+        83 => { keyPressEvent.s = true; },
+        68 => { keyPressEvent.d = true; },
+        38 => { keyPressEvent.up_arrow = true; },
+        37 => { keyPressEvent.left_arrow = true; },
+        40 => { keyPressEvent.down_arrow = true; },
+        39 => { keyPressEvent.right_arrow = true; },
+        else => {},
+    }
 }
 
 fn compile_shaders() void {
@@ -703,6 +746,76 @@ fn setup_color_vertex_VBO() void {
     glcontext.call("vertexAttribPointer", .{3, 1, gl_FLOAT, false, 8 * @sizeOf(f32), 7 * @sizeOf(f32)}, void);
 }
 
+fn process_input() void {
+
+    keyDownLastFrame = keyDown;
+    
+    // Check our (basically another thread) keyPressEvent to see if
+    // buttons have been mashed!
+    // If not, continue.
+    // If so, save the updates, and then clear.
+    if (@as(u8, @bitCast(keyPressEvent)) != 0) {
+        keyDown = keyPressEvent;
+        keyPressEvent = @bitCast(@as(u8, 0));
+    }
+    
+    // keyDown.w           = keyPressEvent.w;
+    // keyDown.a           = glfw.getKey(window, glfw.Key.a) == glfw.Action.press;
+    // keyDown.s           = glfw.getKey(window, glfw.Key.s) == glfw.Action.press;
+    // keyDown.d           = glfw.getKey(window, glfw.Key.d) == glfw.Action.press;
+    
+    // keyDown.up_arrow    = glfw.getKey(window, glfw.Key.up)     == glfw.Action.press;
+    // keyDown.left_arrow  = glfw.getKey(window, glfw.Key.left)   == glfw.Action.press;
+    // keyDown.down_arrow  = glfw.getKey(window, glfw.Key.down)   == glfw.Action.press;
+    // keyDown.right_arrow = glfw.getKey(window, glfw.Key.right)  == gl1fw.Action.press;
+
+    keyPress = @bitCast(@as(u8, @bitCast(keyDown)) & ~ @as(u8, @bitCast(keyDownLastFrame)));
+}
+
+fn update_state() void {
+
+    // Reset tile movement.
+    current_tile_movement_direction = .NONE;
+    
+    // Determine if a tile movement attempt has been made. 
+    if (keyPress.w or keyPress.up_arrow)    { current_tile_movement_direction = .UP; }
+    if (keyPress.a or keyPress.left_arrow)  { current_tile_movement_direction = .LEFT; }
+    if (keyPress.s or keyPress.down_arrow)  { current_tile_movement_direction = .DOWN; }
+    if (keyPress.d or keyPress.right_arrow) { current_tile_movement_direction = .RIGHT; }
+
+    // Reset animation if key press.
+    if (@as(u8, @bitCast(keyPress)) != 0) {
+        animation_start_seconds = @floatCast(current_seconds);
+    }
+
+    // Check if animation over. Otherwise calculate animation fraction.
+    const secs_since_animation_start = current_seconds - animation_start_seconds;
+    if (secs_since_animation_start > ANIMATION_SLIDING_TILE_TIME) {
+        animation_direction = .NONE;
+        animating_tile = 0;
+        animation_tile_fraction = 0;
+    } else {
+        animation_tile_fraction = @floatCast(secs_since_animation_start / ANIMATION_SLIDING_TILE_TIME);
+    }
+    
+    // Try a move!
+    try_grid_update(current_tile_movement_direction);
+
+    // Check if the puzzle is solved (if not already won).
+    if (! is_won ) {
+        is_won = @reduce(.And, grid == std.simd.iota(u8, TILE_NUMBER));
+        if (is_won) {
+            won_start_seconds = @floatCast(current_seconds);
+        }
+    }
+
+    // Calculate the animation_won_fraction.
+    if (is_won) {
+        const secs_since_won : f32 = @floatCast(won_start_seconds - current_seconds);
+        animation_won_fraction   = std.math.clamp(secs_since_won, 0, ANIMATION_WON_TIME) / ANIMATION_WON_TIME;
+        animation_quote_fraction = std.math.clamp(secs_since_won - ANIMATION_WON_TIME + 1, 0, ANIMATION_QUOTE_TIME) / ANIMATION_QUOTE_TIME;
+    }
+}
 // Try and move and calculate the new grid configuration (if it changes).
 fn try_grid_update(tile_movement_direction : GridMovementDirection) void {
     // E.g.
@@ -762,7 +875,7 @@ fn render() void {
     glcontext.call("useProgram", .{background_shader_program}, void);
 
     // Calculate background_shader uniforms.
-    const program_secs : f32 = @floatCast(program_seconds);    
+    const program_secs : f32 = @floatCast(current_seconds);    
     const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
     
     const radius_value : f32 = 0.018571486 * switch(is_won) {
