@@ -524,6 +524,8 @@ fn init_webgl_context() void {
 
     canvas.set("width",  CANVAS_DIMS[0]);
     canvas.set("height", CANVAS_DIMS[1]);
+
+    zjb.global("document").call("addEventListener", .{ zjb.constString("keydown"), zjb.fnHandle("keydownCallback", keydownCallback) }, void);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 
@@ -532,6 +534,12 @@ fn init_webgl_context() void {
     // state... everything seems to be global so just make one VBO to get reused everywhere.
     global_vbo = glcontext.call("createBuffer", .{}, zjb.Handle);
     glcontext.call("bindBuffer", .{gl_ARRAY_BUFFER, global_vbo}, void);
+}
+
+fn keydownCallback(event: zjb.Handle) callconv(.C) void {
+    defer event.release();
+
+    zjb.global("console").call("log", .{ zjb.constString("From keydown callback, event:"), event }, void);
 }
 
 fn compile_shaders() void {
