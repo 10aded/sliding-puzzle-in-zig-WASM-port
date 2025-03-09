@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
 
     const sliding_puzzle = b.addExecutable(.{
         .name = "port_sliding_puzzle",
-        .root_source_file = b.path("port_sliding_puzzle.zig"),
+        .root_source_file = b.path("sliding_puzzle_web_game.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding }),
         .optimize = optimize,
     });

@@ -1,7 +1,14 @@
-// An example of how to render a looping fractal in WebGL
-// without having to write native .js code using the zjb
-// library. (Using the library makes it possbile to call
-// .js functions from within Zig when needed.)
+// A web port of a desktop sliding puzzle game made in Zig.
+// 
+// At no stage in this port was any native .js code written,
+// (but .js browser functions are called), this is acheived
+// by using the zjb library.
+//
+// As such, the entire game is basically contained within the
+// .WASM that this code (together with the Zig build system)
+// generates. (The build system automatically generates the
+// binding .js .WASM code needed to call functions from outside
+// the .WASM.)
 //
 // Created by 10aded throughout March 2025. 
 //
@@ -67,7 +74,7 @@ const PI : f32 = std.math.pi;
 // values below.
 const CANVAS_DIMS : @Vector(2, i32) = .{800, 800};
 
-const GRID_DIMENSION = 2;
+const GRID_DIMENSION = 3;
 
 // Constants
 const TILE_NUMBER = GRID_DIMENSION * GRID_DIMENSION;
@@ -269,7 +276,6 @@ fn rectangle(pos : Vec2, width : f32, height : f32) Rectangle {
     return Rectangle{.center = pos, .width = width, .height = height};
 }
 
-
 export fn main() void {
     init_clock();
 
@@ -282,8 +288,6 @@ export fn main() void {
     compile_shaders();
 
     create_bind_textures();
-    
-    // logStr("Debug: Begin main loop.");
     
     animationFrame(initial_seconds);
 }
@@ -302,7 +306,6 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
 
     zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
-
 
 
 fn init_grid() void {
@@ -807,7 +810,6 @@ fn update_state() void {
         const secs_since_won : f32 = @floatCast(current_seconds - won_start_seconds);
         animation_won_fraction   = std.math.clamp(secs_since_won, 0, ANIMATION_WON_TIME) / ANIMATION_WON_TIME;
         animation_quote_fraction = std.math.clamp(secs_since_won - ANIMATION_WON_TIME + 1, 0, ANIMATION_QUOTE_TIME) / ANIMATION_QUOTE_TIME;
-        log(secs_since_won);
     }
 }
 // Try and move and calculate the new grid configuration (if it changes).
