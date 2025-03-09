@@ -768,7 +768,6 @@ fn render() void {
     
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, 6}, void);
 
-    // TODO...    
     // Render the tiles.
     setup_color_vertex_VBO();
     glcontext.call("useProgram", .{color_texture_shader_program}, void);
@@ -797,21 +796,17 @@ fn render() void {
     
     // Reset the vertex_buffer.
     vertex_buffer_index = 0;
-    
-    // Make the quote texture active.
+
+    // Draw the quote.
     glcontext.call("bindTexture", .{gl_TEXTURE_2D, quote_texture}, void);
 
-    // Note: The game window is assumed to have dimensions 500 x 500;
-    // which informed the values below.
     const quote_width_f32  : f32 = @floatFromInt(quote_width);
     const quote_height_f32 : f32 = @floatFromInt(quote_height);
-    const quote_pos : Vec2 = .{225, 400};
-    const quote_rectangle = rectangle(quote_pos, 0.5 * quote_width_f32, 0.5 * quote_height_f32);
+    const quote_pos_relative : Vec2 = .{1.12, 1.65};
+    const quote_pos : Vec2 = quote_pos_relative * CENTER;
+    const quote_rectangle = rectangle(quote_pos, quote_width_f32, quote_height_f32);
 
     draw_color_texture_rectangle(quote_rectangle, SPACE_BLACK, .{0,0}, .{1, 1}, animation_quote_fraction);
-
-    // Convert the bufferdata into a [] f32
-    //    var vertex_buffer_f32 : [8 * 6] f32 = undefined;
 
     for (0..vertex_buffer_index) |i| {
         vertex_buffer_f32[8 * i + 0] = vertex_buffer[i].x;
@@ -827,10 +822,7 @@ fn render() void {
     const quote_gpu_data = vertex_buffer_f32[0..8 * vertex_buffer_index];
     
     const quote_gpu_data_obj = zjb.dataView(quote_gpu_data);
-
-
     
-    // Draw the quote.
     glcontext.call("bufferSubData", .{gl_ARRAY_BUFFER, 0, quote_gpu_data_obj}, void);
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, @as(i32, @intCast(vertex_buffer_index))}, void);
 

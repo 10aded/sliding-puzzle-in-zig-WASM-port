@@ -11,7 +11,9 @@ const float PI = 3.1415926535897932384626433832795;
 uniform float lp;
 uniform float radius; // Should be around 0.08095238.
 
-//const int reps = 10;
+// JUST USING MAGIC (NUMBER) COORDS FOR THE MOMENT...
+const float canvas_width = 800.0;
+
 const int reps = 2;
 
 const float SMOOTHSTEP_WIDTH = 0.010;
@@ -33,8 +35,7 @@ const vec4 DISK_COLOR = WHITE;
 
 void main(void)
 {
-    // JUST USING MAGIC (NUMBER) COORDS FOR THE MOMENT...
-    vec2 normalized_coords = gl_FragCoord.xy / 500.0;
+    vec2 normalized_coords = gl_FragCoord.xy / canvas_width;
     vec2 unit_coord = 2.0 * normalized_coords - 1.0;
     
     vec2 scaled = float(reps) * unit_coord;
