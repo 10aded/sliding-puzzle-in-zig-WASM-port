@@ -62,8 +62,10 @@ const fragment_color_texture_source = @embedFile("./Shaders/fragment-color-textu
 
 const PI : f32 = std.math.pi;
 
-const CANVAS_WIDTH  : i32 = 500;
-const CANVAS_HEIGHT : i32 = 500;
+// On itch, when games are uploaded as a zipped website,
+// the dimensions of the window are set; we choose the
+// values below.
+const CANVAS_DIMS : @Vector(2, i32) = .{800, 800};
 
 const GRID_DIMENSION = 3;
 
@@ -86,14 +88,15 @@ const BACKGROUND_SHADER_SHAPE_CHANGE_TIME = 200;
 // Grid geometry.
 // NOTE: It is assumed that the window dimensions of the game
 // will NOT change.
-const TILE_WIDTH : f32  = 50;
-const TILE_BORDER_WIDTH = 0.05 * TILE_WIDTH;
-const TILE_SPACING      = 0.02 * TILE_WIDTH;
+const TILE_WIDTH : f32  = 0.125 * canvas_dims_f32[0];
+const TILE_BORDER_WIDTH = 0.05  * TILE_WIDTH;
+const TILE_SPACING      = 0.02  * TILE_WIDTH;
 
-const CENTER : Vec2 = .{250, 250};
+const canvas_dims_f32 : Vec2 = @floatFromInt(CANVAS_DIMS);
+const half_splat      : Vec2 = @splat(0.5);
+const CENTER = half_splat * canvas_dims_f32;
 
 const GRID_WIDTH = GRID_DIMENSION * TILE_WIDTH + (GRID_DIMENSION + 1) * TILE_SPACING + 2 * GRID_DIMENSION * TILE_BORDER_WIDTH;
-
 
 
 // Type aliases.
@@ -173,7 +176,8 @@ var animation_won_fraction   : f32 = 0;
 var animation_quote_fraction : f32 = 0;
 
 // Timestamp
-var initial_timestamp      : f64 = undefined;
+var initial_seconds : f64 = undefined;
+var program_seconds : f64 = undefined;
 
 fn log(v: anytype) void {
     zjb.global("console").call("log", .{v}, void);
@@ -246,7 +250,6 @@ fn rectangle(pos : Vec2, width : f32, height : f32) Rectangle {
 
 
 export fn main() void {
-
     logStr("DEBUG: Program start!"); //@debug
     
     init_clock();
@@ -263,8 +266,21 @@ export fn main() void {
     
     logStr("Debug: Begin main loop.");
     
-    animationFrame(initial_timestamp);
+    animationFrame(initial_seconds);
 }
+
+fn animationFrame(timestamp: f64) callconv(.C) void {
+    // NOTE: The timestamp is in milliseconds.
+    program_seconds = timestamp / 1000;
+
+    compute_grid_geometry();
+
+    render();
+
+    zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
+}
+
+
 
 // TODO... replace with proper version...
 fn init_grid() void {
@@ -429,7 +445,7 @@ fn init_clock() void {
     const timeline = zjb.global("document").get("timeline", zjb.Handle);
     defer timeline.release();
     
-    initial_timestamp = timeline.get("currentTime", f64);
+    initial_seconds = timeline.get("currentTime", f64);
 }
 
 fn decompress_images() void {
@@ -463,8 +479,8 @@ fn init_webgl_context() void {
     const canvas = zjb.global("document").call("getElementById", .{zjb.constString("canvas")}, zjb.Handle);
     defer canvas.release();
 
-    canvas.set("width",  CANVAS_WIDTH);
-    canvas.set("height", CANVAS_HEIGHT);
+    canvas.set("width",  CANVAS_DIMS[0]);
+    canvas.set("height", CANVAS_DIMS[1]);
     
     glcontext = canvas.call("getContext", .{zjb.constString("webgl")}, zjb.Handle);
 
@@ -637,14 +653,7 @@ fn setup_color_vertex_VBO() void {
 }
 
 
-fn animationFrame(timestamp: f64) callconv(.C) void {
-
-    // NOTE: The timestamp is in milliseconds.
-    const time_seconds = timestamp / 1000;
-
-
-    compute_grid_geometry();
-    
+fn render() void {
     // Render the background color.
     glcontext.call("clearColor", .{0.2, 0.2, 0.2, 1}, void);
     glcontext.call("clear",      .{gl_COLOR_BUFFER_BIT}, void);
@@ -654,7 +663,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("useProgram", .{background_shader_program}, void);
 
     // Calculate background_shader uniforms.
-    const program_secs : f32 = @floatCast(time_seconds);    
+    const program_secs : f32 = @floatCast(program_seconds);    
     const lp_value = 1.5 + 0.5 * @cos(PI * program_secs / BACKGROUND_SHADER_SHAPE_CHANGE_TIME);
     
     const radius_value : f32 = 0.018571486 * switch(is_won) {
@@ -713,7 +722,7 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     draw_color_texture_rectangle(quote_rectangle, SPACE_BLACK, .{0,0}, .{1, 1}, animation_quote_fraction);
 
     // Convert the bufferdata into a [] f32
-//    var vertex_buffer_f32 : [8 * 6] f32 = undefined;
+    //    var vertex_buffer_f32 : [8 * 6] f32 = undefined;
 
     for (0..vertex_buffer_index) |i| {
         vertex_buffer_f32[8 * i + 0] = vertex_buffer[i].x;
@@ -737,9 +746,8 @@ fn animationFrame(timestamp: f64) callconv(.C) void {
     glcontext.call("drawArrays", .{gl_TRIANGLES, 0, @as(i32, @intCast(vertex_buffer_index))}, void);
 
     vertex_buffer_index = 0;
-    
-    zjb.ConstHandle.global.call("requestAnimationFrame", .{zjb.fnHandle("animationFrame", animationFrame)}, void);
 }
+
 
 fn find_tile_index( wanted_tile : u8) ?usize {
     for (grid, 0..) |tile, i| {
